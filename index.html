@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Merriweather:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>BRAINDUMP</title>
+    <script>
+      // Apply theme + background immediately so there's no white flash before React mounts.
+      (function () {
+        try {
+          var raw = localStorage.getItem("braindump.settings");
+          var theme = "light";
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && (parsed.theme === "light" || parsed.theme === "dark")) {
+              theme = parsed.theme;
+            }
+          }
+          document.documentElement.dataset.theme = theme;
+          var bg = theme === "dark" ? "#0b0d0e" : "#e6e2d8";
+          document.documentElement.style.background = bg;
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0d0e; }
+      html[data-theme="light"], html[data-theme="light"] body { background: #e6e2d8; }
+      #splash {
+        position: fixed; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        flex-direction: column; gap: 18px;
+        background: inherit;
+        color: #3db8d2;
+        font-family: "Inter", system-ui, sans-serif;
+        z-index: 9999;
+        opacity: 1;
+        transition: opacity 220ms ease;
+        pointer-events: none;
+      }
+      html[data-theme="light"] #splash { color: #1f8ba8; }
+      #splash.hidden { opacity: 0; }
+      #splash svg { animation: pulse 1.6s ease-in-out infinite; }
+      #splash .wordmark {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #ebe6d8;
+      }
+      html[data-theme="light"] #splash .wordmark { color: #0a0a0a; }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.55; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="splash" aria-hidden="true">
+      <svg width="52" height="52" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+        <path d="M 754.5 652 A 280 280 0 1 0 652 754.5"
+              fill="none" stroke="currentColor" stroke-width="120" stroke-linecap="round"/>
+        <circle cx="639" cy="639" r="64" fill="#c53929"/>
+      </svg>
+      <div class="wordmark">BRAINDUMP</div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

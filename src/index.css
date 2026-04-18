@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────
+   Theme inspired by the Vaporrine jacket: warm paper + sumi ink,
+   cyan-teal pulse, brick-red accent. Cream is structural, not
+   just foreground text.
+   ───────────────────────────────────────────────────────────── */
+
+:root,
+[data-theme="light"] {
+  --color-background: #e6e2d8;
+  --color-surface: #ece8df;
+  --color-surface-hi: #d9d4c7;
+  --color-border: #b8b1a1;
+  --color-rule: #9b948450;
+  --color-fg: #0a0a0a;
+  --color-fg-muted: #6b665a;
+  --color-fg-dim: #9a9485;
+  --color-accent: #1f8ba8;
+  --color-accent-hi: #2aa3c2;
+  --color-accent-soft: #bde3ed;
+  --color-danger: #c53929;
+  --color-success: #3d7a47;
+}
+
+[data-theme="dark"] {
+  --color-background: #0b0d0e;
+  --color-surface: #13161a;
+  --color-surface-hi: #1b1f25;
+  --color-border: #2c3036;
+  --color-rule: #3a3e4650;
+  --color-fg: #ebe6d8;
+  --color-fg-muted: #8a8576;
+  --color-fg-dim: #5c594f;
+  --color-accent: #3db8d2;
+  --color-accent-hi: #5bd0ea;
+  --color-accent-soft: #153741;
+  --color-danger: #d14433;
+  --color-success: #6fc47e;
+}
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-serif: "Merriweather", ui-serif, Georgia, serif;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-background);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.scroll-soft::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll-soft::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 0; }
+.scroll-soft::-webkit-scrollbar-track { background: transparent; }
+
+.hairline {
+  background: var(--color-border);
+}
+
+/* Thin hairline rule used as a section divider on the tracklist */
+.rule {
+  border-color: var(--color-border);
+}
+
+/* Label treatment: mono, small caps, wide tracking — used for metadata rows */
+.label {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+}
+
+/* Labels + icons: uppercase mono has visual mass concentrated in the
+   caps-height region, so `align-items: center` on a flex row misaligns the
+   glyphs against geometrically-centered lucide icons. We render the label text
+   in a wrapper whose height matches the icon box so both align exactly.
+   (Icons are 13px here; caps-height of 11px mono ~= 8px, so the wrapper
+   centers the glyph block within a 13px box.) */
+.label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.label-row > svg {
+  flex: 0 0 auto;
+  display: block;
+}
+.label-row > span {
+  display: inline-flex;
+  align-items: center;
+  height: 13px;
+  line-height: 1;
+}
+
