@@ -37,11 +37,13 @@ import {
 } from "@/lib/db";
 import { processCapture, type AgentResult } from "@/lib/agent";
 import { useSettings, FONT_STACKS, type GroupBy } from "@/lib/settings";
+import { useUpdater } from "@/lib/updater";
 
 type View = "capture" | "processing" | "items";
 
 export default function App() {
   const { settings, update } = useSettings();
+  const updater = useUpdater(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<number | null>(
     settings.activeProjectId,
@@ -240,6 +242,7 @@ export default function App() {
         onSetView={setView}
         settings={settings}
         onUpdateSettings={update}
+        updater={updater}
         disabled={view === "processing"}
       />
 
@@ -304,6 +307,7 @@ function Header({
   onSetView,
   settings,
   onUpdateSettings,
+  updater,
   disabled,
 }: {
   projects: Project[];
@@ -314,6 +318,7 @@ function Header({
   onSetView: (v: View) => void;
   settings: ReturnType<typeof useSettings>["settings"];
   onUpdateSettings: ReturnType<typeof useSettings>["update"];
+  updater: ReturnType<typeof useUpdater>;
   disabled: boolean;
 }) {
   return (
@@ -425,7 +430,11 @@ function Header({
         </nav>
         <span data-tauri-drag-region className="w-px h-4 hairline self-center" />
         <div className="self-center">
-          <SettingsPopover settings={settings} onUpdate={onUpdateSettings} />
+          <SettingsPopover
+            settings={settings}
+            onUpdate={onUpdateSettings}
+            updater={updater}
+          />
         </div>
       </div>
     </header>

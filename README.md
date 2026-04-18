@@ -26,6 +26,7 @@ In the middle of a demo, a 1:1, a drive, or the shower, ideas arrive. Pausing to
 - **Local-first, private** — everything lives in a SQLite database on your machine. No cloud, no telemetry. The agent runs through the `claude` CLI you already have installed; dumps never leave your machine except for the one API call you explicitly trigger.
 - **Your Claude subscription, no new token bill** — Braindump shells out to the `claude` CLI, which uses whatever authentication you already have (Claude Pro/Max plan, or API key). Pick between Sonnet 4.6 (default), Opus 4.7, Haiku 4.5, or Sonnet 4.5 in settings.
 - **Themed to your mood** — light (warm paper) and dark (sumi-ink + vaporwave teal) themes. Writing font and size are configurable.
+- **Auto-updates** — Braindump checks for a newer version on each launch. When one's available, you'll see a dot on the settings gear; click **Install update** in Settings and it downloads, verifies, replaces itself, and restarts. No manual re-installs after the first one.
 
 ---
 
@@ -145,9 +146,28 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The [release workflow](.github/workflows/release.yml) builds macOS (universal), Linux (AppImage + deb), and Windows (msi + exe) in parallel and attaches them to a **draft** GitHub Release. Review, then publish.
+The [release workflow](.github/workflows/release.yml) builds macOS (universal), Linux (AppImage + deb), and Windows (msi + exe) in parallel, signs each artifact for the updater, generates a `latest.json` manifest, and attaches everything to a **draft** GitHub Release. Review, then publish.
 
 No code signing is configured yet — see the install script comments and [distribution notes in the README](#install-braindump) for what that means for users. If you want to add Apple Developer ID signing + notarization or Windows code signing later, Tauri's action supports both via secrets.
+
+#### One-time: set up the updater signing key
+
+Braindump's auto-updater verifies every update with a signature. You generate a keypair once; the private key lives in GitHub Actions secrets and signs each release, and the public key is embedded in `tauri.conf.json` so the installed app can verify downloads.
+
+```bash
+# Generate the keypair. You'll be asked to set a passphrase (remember it).
+bun tauri signer generate -w ~/.tauri/braindump.key
+```
+
+This prints both the public key and the path to the private key. Then:
+
+1. Open `src-tauri/tauri.conf.json` and replace the `plugins.updater.pubkey` placeholder with the public key printed by the command.
+2. In your GitHub repo → Settings → Secrets and variables → Actions → New repository secret, add:
+   - **`TAURI_SIGNING_PRIVATE_KEY`** — the contents of `~/.tauri/braindump.key` (the private key file).
+   - **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`** — the passphrase you set.
+3. Commit + push the updated `tauri.conf.json`. Future tagged releases will be signed automatically.
+
+**Losing the private key** means you can't ship updates to anyone on an old version — they'd have to re-install from scratch. Back it up in a password manager.
 
 ---
 

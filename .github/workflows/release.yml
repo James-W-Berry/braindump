@@ -67,6 +67,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Used by the Tauri updater plugin to sign update bundles so the
+          # running app can verify them before replacing itself.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Braindump ${{ github.ref_name }}"
@@ -78,6 +82,8 @@ jobs:
             **Windows**: Unsigned — SmartScreen will warn. Click "More info" → "Run anyway".
 
             **Linux**: The `.AppImage` and `.deb` should just work.
+
+            Future versions will install automatically — this app's built-in updater checks for new releases on launch.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
