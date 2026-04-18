@@ -1,0 +1,167 @@
+import { useEffect, useRef, useState } from "react";
+import { Settings as SettingsIcon, Minus, Plus } from "lucide-react";
+import {
+  type FontFamily,
+  FONT_LABELS,
+  FONT_SIZES,
+  AVAILABLE_MODELS,
+  type Settings,
+} from "@/lib/settings";
+
+export function SettingsPopover({
+  settings,
+  onUpdate,
+}: {
+  settings: Settings;
+  onUpdate: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const fontIdx = FONT_SIZES.indexOf(settings.fontSize);
+  const activeModel = AVAILABLE_MODELS.find((m) => m.id === settings.model);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Settings"
+        className="text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-accent)] transition-colors"
+      >
+        <SettingsIcon size={14} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-9 w-80 z-40 bg-[color:var(--color-background)] border border-[color:var(--color-border)] shadow-2xl max-h-[80vh] overflow-auto scroll-soft">
+          <Section label="theme">
+            <div className="flex items-center gap-3">
+              <ThemeLink
+                active={settings.theme === "light"}
+                onClick={() => onUpdate("theme", "light")}
+                label="light"
+              />
+              <span className="text-[color:var(--color-fg-dim)] text-xs">/</span>
+              <ThemeLink
+                active={settings.theme === "dark"}
+                onClick={() => onUpdate("theme", "dark")}
+                label="dark"
+              />
+            </div>
+          </Section>
+
+          <Section label="model">
+            <select
+              value={settings.model}
+              onChange={(e) => onUpdate("model", e.target.value)}
+              className="w-full bg-transparent border-b border-[color:var(--color-border)] px-0 h-8 text-sm focus:outline-none focus:border-[color:var(--color-accent)]"
+            >
+              {AVAILABLE_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            {activeModel && (
+              <p className="text-xs text-[color:var(--color-fg-muted)] mt-2 leading-relaxed">
+                {activeModel.description}
+              </p>
+            )}
+          </Section>
+
+          <Section label="writing font">
+            <div className="space-y-0.5">
+              {(Object.keys(FONT_LABELS) as FontFamily[]).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => onUpdate("font", f)}
+                  className={`w-full text-left px-0 h-7 text-sm transition-colors ${
+                    settings.font === f
+                      ? "text-[color:var(--color-accent)]"
+                      : "text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)]"
+                  }`}
+                >
+                  <span className="inline-block w-3 font-mono text-xs text-[color:var(--color-fg-dim)]">
+                    {settings.font === f ? "●" : "·"}
+                  </span>{" "}
+                  {FONT_LABELS[f]}
+                </button>
+              ))}
+            </div>
+          </Section>
+
+          <Section label="font size" last>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => onUpdate("fontSize", FONT_SIZES[Math.max(0, fontIdx - 1)])}
+                disabled={fontIdx <= 0}
+                className="text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-accent)] disabled:opacity-30 transition-colors"
+              >
+                <Minus size={14} />
+              </button>
+              <div className="flex-1 text-center font-mono text-sm tabular-nums">
+                {settings.fontSize.toString().padStart(2, "0")}px
+              </div>
+              <button
+                onClick={() =>
+                  onUpdate("fontSize", FONT_SIZES[Math.min(FONT_SIZES.length - 1, fontIdx + 1)])
+                }
+                disabled={fontIdx >= FONT_SIZES.length - 1}
+                className="text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-accent)] disabled:opacity-30 transition-colors"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+          </Section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Section({
+  label,
+  last,
+  children,
+}: {
+  label: string;
+  last?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`px-5 py-4 ${last ? "" : "border-b border-[color:var(--color-border)]"}`}>
+      <div className="label text-[color:var(--color-fg-muted)] mb-3">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function ThemeLink({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`label transition-colors ${
+        active
+          ? "text-[color:var(--color-accent)]"
+          : "text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)]"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
