@@ -8,6 +8,12 @@ import {
   Undo2,
   ChevronUp,
   ChevronDown,
+  Music2,
+  Sparkles,
+  Minimize2,
+  Maximize2,
+  PictureInPicture2,
+  Check,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Logo } from "@/components/Logo";
@@ -16,6 +22,18 @@ import { SettingsPopover } from "@/components/SettingsPopover";
 import { ProcessingView } from "@/components/ProcessingView";
 import { SetupWizard } from "@/components/SetupWizard";
 import { ScreenshotStudio } from "@/components/ScreenshotStudio";
+import { CaptureAmbient } from "@/components/CaptureAmbient";
+import {
+  YouTubePlayer,
+  parseYouTubeId,
+  youtubeThumbnailUrl,
+  fetchYouTubeTitle,
+} from "@/components/YouTubePlayer";
+import {
+  MAX_MUSIC_RECENTS,
+  type MusicRecent,
+  type Settings,
+} from "@/lib/settings";
 import { EditableText, EditableSelect, EditableCombo } from "@/components/Editable";
 import {
   listProjects,
@@ -85,6 +103,50 @@ export default function App() {
   useEffect(() => {
     if (view === "capture" || view === "items") update("view", view);
   }, [view]);
+
+  // Record every active music URL into the recents LRU, fetching the
+  // video title via oEmbed if we don't already have one cached. Runs
+  // whenever the active URL changes (including on app load with a
+  // persisted URL) so titles appear retroactively for old entries.
+  useEffect(() => {
+    const url = settings.musicUrl;
+    if (!url) return;
+    const id = parseYouTubeId(url);
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      // Read the cached title from a snapshot to decide whether to
+      // fetch — if it's already cached, skip the network round-trip.
+      const cached = settings.musicRecents.find((r) => r.id === id);
+      const title = cached?.title ?? (await fetchYouTubeTitle(url));
+      if (cancelled) return;
+      // Functional update so we rebuild against the *latest* recents
+      // rather than the snapshot we started with. This matters for
+      // `lastPosition` — progress saves from the YouTube player may
+      // have landed while we were awaiting the fetch, and we must not
+      // clobber them with a stale value.
+      update("musicRecents", (prev) => {
+        const existing = prev.find((r) => r.id === id);
+        const others = prev.filter((r) => r.id !== id);
+        return [
+          {
+            id,
+            url: existing?.url ?? url,
+            title,
+            lastUsed: Date.now(),
+            lastPosition: existing?.lastPosition,
+          },
+          ...others,
+        ].slice(0, MAX_MUSIC_RECENTS);
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Only re-run on musicUrl change. Depending on musicRecents would
+    // cause a feedback loop since this effect writes to musicRecents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.musicUrl]);
 
   useEffect(() => {
     if (activeProjectId == null) return;
@@ -336,6 +398,38 @@ export default function App() {
             projectName={activeProject?.name ?? ""}
             fontFamily={FONT_STACKS[settings.font]}
             fontSize={settings.fontSize}
+            ambientBackground={settings.ambientBackground}
+            musicUrl={settings.musicUrl}
+            musicPlaying={settings.musicPlaying}
+            musicVolume={settings.musicVolume}
+            musicMode={settings.musicMode}
+            musicRecents={settings.musicRecents}
+            onMusicProgress={(id, seconds, ended) => {
+              // Functional update so we don't race against other
+              // settings writes (e.g. the title-fetch effect) that
+              // may be landing around the same time.
+              update("musicRecents", (prev) =>
+                prev.map((r) =>
+                  r.id === id
+                    ? { ...r, lastPosition: ended ? 0 : seconds }
+                    : r,
+                ),
+              );
+            }}
+            onToggleBackdrop={() =>
+              update("ambientBackground", !settings.ambientBackground)
+            }
+            onSetMusicUrl={(u) => {
+              update("musicUrl", u);
+              // Auto-play whenever a valid URL lands, and stop if it
+              // gets cleared.
+              update("musicPlaying", parseYouTubeId(u) != null);
+            }}
+            onToggleMusic={() =>
+              update("musicPlaying", !settings.musicPlaying)
+            }
+            onSetVolume={(v) => update("musicVolume", v)}
+            onSetMusicMode={(m) => update("musicMode", m)}
           />
         ) : (
           <ItemsView
@@ -587,6 +681,18 @@ function CaptureView({
   projectName,
   fontFamily,
   fontSize,
+  ambientBackground,
+  musicUrl,
+  musicPlaying,
+  musicVolume,
+  musicMode,
+  musicRecents,
+  onToggleBackdrop,
+  onSetMusicUrl,
+  onToggleMusic,
+  onSetVolume,
+  onSetMusicMode,
+  onMusicProgress,
 }: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   draft: string;
@@ -595,18 +701,124 @@ function CaptureView({
   projectName: string;
   fontFamily: string;
   fontSize: number;
+  ambientBackground: boolean;
+  musicUrl: string | null;
+  musicPlaying: boolean;
+  musicVolume: number;
+  musicMode: Settings["musicMode"];
+  musicRecents: MusicRecent[];
+  onToggleBackdrop: () => void;
+  onSetMusicUrl: (url: string | null) => void;
+  onToggleMusic: () => void;
+  onSetVolume: (v: number) => void;
+  onSetMusicMode: (m: Settings["musicMode"]) => void;
+  onMusicProgress: (videoId: string, seconds: number, ended: boolean) => void;
 }) {
   const wordCount = draft.trim() ? draft.trim().split(/\s+/).length : 0;
+  const [tick, setTick] = useState(0);
+  const [keyTick, setKeyTick] = useState(0);
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [urlDraft, setUrlDraft] = useState(musicUrl ?? "");
+  const [thumbnailHovered, setThumbnailHovered] = useState(false);
+  const [thumbnailRect, setThumbnailRect] = useState<DOMRect | null>(null);
+  const thumbnailBtnRef = useRef<HTMLButtonElement>(null);
+  const prevWordCount = useRef(wordCount);
+  const videoId = parseYouTubeId(musicUrl);
+  const hasValidUrl = videoId != null;
+  const showBackgroundThumb =
+    hasValidUrl && musicPlaying && musicMode === "background";
+
+  // Measure the thumbnail button's viewport rect so the hover popup
+  // can be fixed-positioned against it. Re-measure on resize and when
+  // mode/url changes cause layout shifts.
+  useEffect(() => {
+    if (musicMode !== "thumbnail" || !hasValidUrl) {
+      setThumbnailRect(null);
+      return;
+    }
+    const measure = () => {
+      const el = thumbnailBtnRef.current;
+      if (el) setThumbnailRect(el.getBoundingClientRect());
+    };
+    // First measure on next frame — the element may have just mounted.
+    const raf = requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", measure);
+    };
+  }, [musicMode, hasValidUrl, musicPlaying]);
+
+  useEffect(() => {
+    if (prevWordCount.current !== wordCount) {
+      prevWordCount.current = wordCount;
+      setTick((t) => t + 1);
+    }
+  }, [wordCount]);
+
+  useEffect(() => {
+    if (!editingUrl) setUrlDraft(musicUrl ?? "");
+  }, [musicUrl, editingUrl]);
+
+  // Set by the recent-picker path so the follow-up blur doesn't try
+  // to re-commit (which would no-op but is cleaner to skip entirely).
+  const skipNextCommit = useRef(false);
+
+  const openEditor = () => {
+    // Start the field empty so the user can see their whole recents
+    // list without first highlighting and clearing.
+    setUrlDraft("");
+    setEditingUrl(true);
+  };
+
+  const commitUrl = () => {
+    if (skipNextCommit.current) {
+      skipNextCommit.current = false;
+      setEditingUrl(false);
+      return;
+    }
+    const trimmed = urlDraft.trim();
+    if (!trimmed) {
+      // Empty on blur — user clicked off without picking. Keep the
+      // current video as-is rather than clearing it.
+      setEditingUrl(false);
+      return;
+    }
+    if (parseYouTubeId(trimmed)) {
+      onSetMusicUrl(trimmed);
+    }
+    // If the input isn't a parseable URL, leave settings untouched —
+    // the user can correct it and commit again.
+    setEditingUrl(false);
+  };
+
+  // Title-first label for the collapsed state. Falls back to the
+  // video ID when oEmbed hasn't resolved a title for this video yet.
+  const currentLabel = (() => {
+    if (!videoId) return "";
+    const rec = musicRecents.find((r) => r.id === videoId);
+    if (rec?.title) return rec.title;
+    return `youtube · ${videoId}`;
+  })();
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="relative flex flex-col h-full">
+      {/* Animated backdrop is suppressed in background mode — the
+          YouTube thumbnail below takes its place. */}
+      {!showBackgroundThumb && <CaptureAmbient enabled={ambientBackground} />}
+      {showBackgroundThumb && videoId && (
+        <BackgroundThumbnail videoId={videoId} />
+      )}
       <textarea
         ref={textareaRef}
         value={draft}
-        onChange={(e) => onDraftChange(e.target.value)}
+        onChange={(e) => {
+          onDraftChange(e.target.value);
+          setKeyTick((k) => (k + 1) % 1_000_000);
+        }}
         placeholder={`Dump thoughts for ${projectName || "your project"}. No structure needed — just write.`}
-        style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1.6 }}
-        className="flex-1 resize-none bg-transparent outline-none px-10 py-8 text-[color:var(--color-fg)] placeholder:text-[color:var(--color-fg-dim)] scroll-soft caret-[color:var(--color-accent)]"
+        style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1.35 }}
+        className="capture-textarea flex-1 resize-none bg-transparent outline-none px-10 py-8 text-[color:var(--color-fg)] placeholder:text-[color:var(--color-fg-dim)] scroll-soft relative z-10"
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
             e.preventDefault();
@@ -614,11 +826,167 @@ function CaptureView({
           }
         }}
       />
-      <footer className="flex items-center justify-between px-6 h-12 border-t border-[color:var(--color-border)] bg-[color:var(--color-background)]">
-        <span className="label label-row text-[color:var(--color-fg-muted)] tabular-nums">
-          {wordCount.toString().padStart(3, "0")} words
-        </span>
-        <div className="flex items-center gap-5">
+      <span
+        key={keyTick}
+        aria-hidden="true"
+        className="capture-pulse pointer-events-none absolute inset-x-0 bottom-12 h-px z-10"
+      />
+      {/* ONE persistent player. Kept mounted whenever a URL is set —
+          including while paused, and across mode changes — so the
+          iframe never reloads and the video keeps its position. */}
+      {hasValidUrl && (
+        <YouTubePlayer
+          url={musicUrl}
+          playing={musicPlaying}
+          volume={musicVolume}
+          mode={musicMode}
+          thumbnailRect={thumbnailRect}
+          thumbnailHovered={thumbnailHovered}
+          onSetThumbnailHovered={setThumbnailHovered}
+          onClose={musicMode === "floating" ? onToggleMusic : undefined}
+          startSeconds={
+            musicRecents.find((r) => r.id === videoId)?.lastPosition
+          }
+          onProgress={onMusicProgress}
+        />
+      )}
+      <footer className="relative z-10 flex items-center justify-between px-6 h-12 border-t border-[color:var(--color-border)] bg-[color:var(--color-background)]/80 backdrop-blur-sm">
+        <div className="flex items-center gap-4 min-w-0">
+          <span
+            key={tick}
+            className="wordcount-tick label label-row text-[color:var(--color-fg-muted)] tabular-nums shrink-0"
+          >
+            {wordCount.toString().padStart(3, "0")} words
+          </span>
+          <span className="w-px h-3.5 hairline shrink-0" />
+          <button
+            onClick={onToggleBackdrop}
+            title={
+              ambientBackground
+                ? "animated backdrop: on (click to disable)"
+                : "animated backdrop: off (click to enable)"
+            }
+            className={`shrink-0 transition-colors ${
+              ambientBackground
+                ? "text-[color:var(--color-accent)]"
+                : "text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-fg-muted)]"
+            }`}
+          >
+            <Sparkles size={13} />
+          </button>
+          {hasValidUrl && musicMode === "thumbnail" ? (
+            <button
+              ref={thumbnailBtnRef}
+              onClick={onToggleMusic}
+              onMouseEnter={() => setThumbnailHovered(true)}
+              onMouseLeave={() => setThumbnailHovered(false)}
+              title={musicPlaying ? "pause (hover for controls)" : "play"}
+              className="relative block shrink-0 w-6 h-6 overflow-hidden border border-[color:var(--color-border)] rounded-sm"
+            >
+              <img
+                src={youtubeThumbnailUrl(videoId!, "default")}
+                alt=""
+                aria-hidden="true"
+                className={`w-full h-full object-cover transition-all ${
+                  musicPlaying ? "opacity-100" : "opacity-55 grayscale"
+                }`}
+              />
+              {musicPlaying && (
+                <span
+                  aria-hidden="true"
+                  className="ambient-dot absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[color:var(--color-accent)] border border-[color:var(--color-background)]"
+                />
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                if (hasValidUrl) {
+                  onToggleMusic();
+                } else {
+                  openEditor();
+                }
+              }}
+              title={
+                hasValidUrl
+                  ? musicPlaying
+                    ? "pause"
+                    : "play"
+                  : "paste a YouTube link"
+              }
+              className={`shrink-0 label label-row transition-colors ${
+                musicPlaying && hasValidUrl
+                  ? "text-[color:var(--color-accent)]"
+                  : "text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-fg-muted)]"
+              }`}
+            >
+              <Music2 size={13} />
+              {musicPlaying && hasValidUrl && (
+                <span className="sound-wave" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              )}
+            </button>
+          )}
+          {editingUrl ? (
+            <RecentsCombo
+              value={urlDraft}
+              onChange={setUrlDraft}
+              onCommit={commitUrl}
+              onCancel={() => {
+                setUrlDraft(musicUrl ?? "");
+                setEditingUrl(false);
+              }}
+              onPickRecent={(r) => {
+                // Guard against the follow-up blur (from React
+                // unmounting the input) re-committing whatever was in
+                // the draft — the pick is the source of truth.
+                skipNextCommit.current = true;
+                onSetMusicUrl(r.url);
+                setEditingUrl(false);
+              }}
+              recents={musicRecents}
+              currentId={videoId}
+            />
+          ) : hasValidUrl ? (
+            <button
+              onClick={openEditor}
+              title={`change video · ${currentLabel}`}
+              className="min-w-0 max-w-[220px] truncate text-xs text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)] transition-colors"
+            >
+              {currentLabel}
+            </button>
+          ) : (
+            <button
+              onClick={openEditor}
+              className="shrink-0 label text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-fg-muted)] transition-colors"
+            >
+              + add link
+            </button>
+          )}
+          {musicPlaying && hasValidUrl && (
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={Number.isFinite(musicVolume) ? musicVolume : 0.5}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v)) onSetVolume(v);
+              }}
+              title={`volume ${Math.round((Number.isFinite(musicVolume) ? musicVolume : 0.5) * 100)}%`}
+              className="shrink-0 w-20 h-1 accent-[color:var(--color-accent)] cursor-pointer"
+            />
+          )}
+          {hasValidUrl && (
+            <MusicModeSwitcher mode={musicMode} onChange={onSetMusicMode} />
+          )}
+        </div>
+        <div className="flex items-center gap-5 shrink-0">
           <span className="text-xs font-mono tracking-wide text-[color:var(--color-fg-muted)]">
             <kbd className="px-1.5 py-0.5 border border-[color:var(--color-border)] rounded-[3px]">
               ⌘
@@ -635,6 +1003,196 @@ function CaptureView({
           </Button>
         </div>
       </footer>
+    </div>
+  );
+}
+
+/**
+ * Full-size, heavily softened YouTube thumbnail for background mode.
+ * Uses maxres when available, falls back to hq on 404 — YouTube
+ * doesn't guarantee maxresdefault for every video.
+ *
+ * A theme-colored scrim sits on top of the image so that bright or
+ * high-contrast thumbnails can't punch through and fight the text.
+ * The combination reads as a hint of color/mood, not a picture.
+ */
+function BackgroundThumbnail({ videoId }: { videoId: string }) {
+  const [fallback, setFallback] = useState(false);
+  const src = youtubeThumbnailUrl(videoId, fallback ? "hq" : "maxres");
+  return (
+    <img
+      key={src}
+      src={src}
+      alt=""
+      aria-hidden="true"
+      onError={() => {
+        if (!fallback) setFallback(true);
+      }}
+      className="absolute inset-0 w-full h-full object-cover opacity-[0.18] pointer-events-none z-0 blur-[8px] saturate-[0.9]"
+    />
+  );
+}
+
+/**
+ * URL input paired with an autocomplete dropdown of the user's recent
+ * YouTube links. Shows each recent with its oEmbed-resolved title and
+ * a thumbnail, filtered against whatever the user has typed.
+ *
+ * Menu items use `onMouseDown` + `preventDefault` so clicking an entry
+ * selects it without first firing the input's `blur` (which would
+ * close the edit session before the click registered).
+ */
+function RecentsCombo({
+  value,
+  onChange,
+  onCommit,
+  onCancel,
+  onPickRecent,
+  recents,
+  currentId,
+}: {
+  value: string;
+  onChange: (s: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+  onPickRecent: (r: MusicRecent) => void;
+  recents: MusicRecent[];
+  currentId: string | null;
+}) {
+  const [open, setOpen] = useState(true);
+
+  const filtered = useMemo(() => {
+    const q = value.trim().toLowerCase();
+    const sorted = [...recents].sort((a, b) => b.lastUsed - a.lastUsed);
+    if (!q) return sorted;
+    return sorted.filter((r) => {
+      return (
+        r.title?.toLowerCase().includes(q) ||
+        r.id.toLowerCase().includes(q) ||
+        r.url.toLowerCase().includes(q)
+      );
+    });
+  }, [recents, value]);
+
+  return (
+    <div className="relative flex-1 min-w-0 max-w-[260px]">
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={onCommit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onCommit();
+          else if (e.key === "Escape") onCancel();
+        }}
+        placeholder="paste youtube url…"
+        spellCheck={false}
+        className="w-full bg-transparent border-b border-[color:var(--color-border)] focus:border-[color:var(--color-accent)] outline-none text-xs font-mono text-[color:var(--color-fg)] placeholder:text-[color:var(--color-fg-dim)]"
+      />
+      {open && filtered.length > 0 && (
+        <ul
+          className="absolute bottom-full left-0 mb-2 w-[320px] max-h-[280px] overflow-auto scroll-soft bg-[color:var(--color-surface)] border border-[color:var(--color-border)] shadow-[0_10px_40px_-10px_rgba(0,0,0,0.45)] z-40"
+          // Prevent the input from losing focus when clicking inside
+          // the scrollbar — that would close the menu mid-scroll.
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {filtered.map((r) => {
+            const isActive = r.id === currentId;
+            return (
+              <li key={r.id}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    onPickRecent(r);
+                  }}
+                  className={`flex items-center gap-2.5 w-full text-left px-2.5 py-2 transition-colors border-b border-[color:var(--color-border)] last:border-b-0 ${
+                    isActive
+                      ? "bg-[color:var(--color-accent-soft)] hover:bg-[color:var(--color-surface-hi)]"
+                      : "hover:bg-[color:var(--color-surface-hi)]"
+                  }`}
+                >
+                  <img
+                    src={youtubeThumbnailUrl(r.id, "default")}
+                    alt=""
+                    aria-hidden="true"
+                    className="w-10 h-6 object-cover shrink-0 border border-[color:var(--color-border)]"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className={`text-[13px] truncate leading-tight ${
+                        isActive
+                          ? "text-[color:var(--color-accent)]"
+                          : "text-[color:var(--color-fg)]"
+                      }`}
+                    >
+                      {r.title ?? (
+                        <span className="italic text-[color:var(--color-fg-muted)]">
+                          (untitled)
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] font-mono text-[color:var(--color-fg-dim)] truncate mt-0.5">
+                      {r.id}
+                    </div>
+                  </div>
+                  {isActive && (
+                    <Check
+                      size={14}
+                      className="shrink-0 text-[color:var(--color-accent)]"
+                      aria-label="currently playing"
+                    />
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Segmented icon switcher for the three music presentation modes.
+ * Active mode renders in accent color; others fade to the dim tier.
+ */
+function MusicModeSwitcher({
+  mode,
+  onChange,
+}: {
+  mode: Settings["musicMode"];
+  onChange: (m: Settings["musicMode"]) => void;
+}) {
+  const items: {
+    key: Settings["musicMode"];
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
+    { key: "thumbnail", label: "thumbnail (hover to control)", icon: <Minimize2 size={12} /> },
+    { key: "floating", label: "floating mini player", icon: <PictureInPicture2 size={12} /> },
+    { key: "background", label: "background image", icon: <Maximize2 size={12} /> },
+  ];
+  return (
+    <div className="shrink-0 flex items-center gap-1.5 border-l border-[color:var(--color-border)] pl-3 ml-1">
+      {items.map((it) => (
+        <button
+          key={it.key}
+          onClick={() => onChange(it.key)}
+          title={it.label}
+          className={`transition-colors p-0.5 ${
+            mode === it.key
+              ? "text-[color:var(--color-accent)]"
+              : "text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-fg-muted)]"
+          }`}
+        >
+          {it.icon}
+        </button>
+      ))}
     </div>
   );
 }

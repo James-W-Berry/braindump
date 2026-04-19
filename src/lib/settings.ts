@@ -1,7 +1,31 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-export type Theme = "light" | "dark";
+export type Theme = "light" | "dark" | "vapor" | "gilt";
+
+/**
+ * A YouTube video the user has played before. Tracked in a capped LRU
+ * list so the URL input can double as an autocomplete showing the
+ * user's own favorites / most-used streams.
+ */
+export interface MusicRecent {
+  /** 11-character YouTube video ID — the unique key. */
+  id: string;
+  /** Original URL the user pasted (or derived from the ID). */
+  url: string;
+  /** Fetched title via oEmbed. Null when we couldn't resolve it. */
+  title: string | null;
+  /** When this entry last became the active video, ms since epoch. */
+  lastUsed: number;
+  /**
+   * Last known playback position in seconds. When the user returns to
+   * this video the player is told to seek here so sessions resume
+   * where they left off. Cleared to 0 on end-of-video.
+   */
+  lastPosition?: number;
+}
+
+export const MAX_MUSIC_RECENTS = 20;
 export type FontFamily = "sans" | "mono" | "serif" | "system";
 export type GroupBy = "priority" | "topic" | "category";
 
@@ -148,6 +172,37 @@ export interface Settings {
    * version that isn't on the hardcoded candidate list).
    */
   claudeCliPath: string | null;
+  /**
+   * Animated, theme-tinted background layer behind the capture textarea.
+   * On by default; users on very low-end machines can disable.
+   */
+  ambientBackground: boolean;
+  /**
+   * YouTube URL to play as ambient music on the Capture view. Supports
+   * standard watch/short/embed/live URL forms and raw 11-char video IDs.
+   * Null when the user hasn't set one yet.
+   */
+  musicUrl: string | null;
+  /** Whether the music is currently playing. */
+  musicPlaying: boolean;
+  /** Music volume 0..1. */
+  musicVolume: number;
+  /**
+   * How the YouTube player presents itself on the Capture view:
+   *   • `thumbnail` — tiny video thumbnail in the footer; hover reveals
+   *     a small player popup for controls.
+   *   • `floating`  — a fixed 240×135 mini player pinned to the
+   *     bottom-right of the writing area.
+   *   • `background` — the video's thumbnail tiles behind the textarea
+   *     at low opacity, replacing the animated backdrop. Audio only.
+   */
+  musicMode: "thumbnail" | "floating" | "background";
+  /**
+   * Recent YouTube videos the user has played. Most recent first,
+   * capped at {@link MAX_MUSIC_RECENTS}. Surfaced by the URL input as
+   * an autocomplete menu.
+   */
+  musicRecents: MusicRecent[];
 }
 
 const DEFAULTS: Settings = {
@@ -162,6 +217,12 @@ const DEFAULTS: Settings = {
   activeProjectId: null,
   view: "capture",
   claudeCliPath: null,
+  ambientBackground: true,
+  musicUrl: null,
+  musicPlaying: false,
+  musicVolume: 0.5,
+  musicMode: "floating",
+  musicRecents: [],
 };
 
 const STORAGE_KEY = "braindump.settings";
@@ -170,7 +231,26 @@ function load(): Settings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULTS;
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    const merged = { ...DEFAULTS, ...JSON.parse(raw) } as Settings;
+    // JSON.stringify coerces NaN → null, so a bad persisted value lands here
+    // as null and would override the sane default from the spread above.
+    // Re-apply defaults for numeric fields that failed the round-trip.
+    if (
+      typeof merged.musicVolume !== "number" ||
+      !Number.isFinite(merged.musicVolume)
+    ) {
+      merged.musicVolume = DEFAULTS.musicVolume;
+    }
+    if (
+      typeof merged.fontSize !== "number" ||
+      !Number.isFinite(merged.fontSize)
+    ) {
+      merged.fontSize = DEFAULTS.fontSize;
+    }
+    if (!Array.isArray(merged.musicRecents)) {
+      merged.musicRecents = DEFAULTS.musicRecents;
+    }
+    return merged;
   } catch {
     return DEFAULTS;
   }
@@ -188,14 +268,26 @@ export function useSettings() {
   useEffect(() => {
     save(settings);
     document.documentElement.dataset.theme = settings.theme;
-    // Tell the OS window chrome (titlebar, traffic lights) to match our theme.
+    // Tell the OS window chrome (titlebar, traffic lights) to match. Tauri
+    // only understands "light" | "dark"; vapor is dark-derived so we fall
+    // through to "dark" there.
+    const osTheme = settings.theme === "light" ? "light" : "dark";
     getCurrentWindow()
-      .setTheme(settings.theme)
+      .setTheme(osTheme)
       .catch(() => {});
   }, [settings]);
 
-  function update<K extends keyof Settings>(key: K, value: Settings[K]) {
-    setSettings((prev) => ({ ...prev, [key]: value }));
+  function update<K extends keyof Settings>(
+    key: K,
+    value: Settings[K] | ((prev: Settings[K]) => Settings[K]),
+  ) {
+    setSettings((prev) => ({
+      ...prev,
+      [key]:
+        typeof value === "function"
+          ? (value as (p: Settings[K]) => Settings[K])(prev[key])
+          : value,
+    }));
   }
 
   return { settings, update };

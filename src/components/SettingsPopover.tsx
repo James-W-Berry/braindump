@@ -62,7 +62,7 @@ export function SettingsPopover({
       {open && (
         <div className="absolute right-0 top-9 w-80 z-40 bg-[color:var(--color-background)] border border-[color:var(--color-border)] shadow-2xl max-h-[80vh] overflow-auto scroll-soft">
           <Section label="theme">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <ThemeLink
                 active={settings.theme === "light"}
                 onClick={() => onUpdate("theme", "light")}
@@ -73,6 +73,18 @@ export function SettingsPopover({
                 active={settings.theme === "dark"}
                 onClick={() => onUpdate("theme", "dark")}
                 label="dark"
+              />
+              <span className="text-[color:var(--color-fg-dim)] text-xs">/</span>
+              <ThemeLink
+                active={settings.theme === "gilt"}
+                onClick={() => onUpdate("theme", "gilt")}
+                label="gilt"
+              />
+              <span className="text-[color:var(--color-fg-dim)] text-xs">/</span>
+              <ThemeLink
+                active={settings.theme === "vapor"}
+                onClick={() => onUpdate("theme", "vapor")}
+                label="vapor"
               />
             </div>
           </Section>

@@ -39,6 +39,51 @@
   --color-success: #6fc47e;
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Vapor — nostalgia vaporwave palette tuned to the logo's
+   gold plate / cream sun / teal bands. Night sky indigo base,
+   magenta primary pulse, teal secondary (echoing the bands),
+   gold warning (echoing the plate). Used for the capture flow
+   as an "immersive writing" mode.
+   ───────────────────────────────────────────────────────────── */
+[data-theme="vapor"] {
+  --color-background: #140826;
+  --color-surface: #1e0f38;
+  --color-surface-hi: #281449;
+  --color-border: #4a2d78;
+  --color-rule: #4a2d7860;
+  --color-fg: #f0e9d8;
+  --color-fg-muted: #b59ad4;
+  --color-fg-dim: #6e548f;
+  --color-accent: #ff6ad5;
+  --color-accent-hi: #ff8fe0;
+  --color-accent-soft: #3a1a3a;
+  --color-danger: #ffb84d;
+  --color-success: #4de0c7;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Gilt — a literal rendering of the logo's palette. Gold-leaf
+   plate as a warm structural field, cream sun, teal bands. Feels
+   like writing on a sunlit lacquered tablet. Daylight cousin to
+   Vapor's night-sky take.
+   ───────────────────────────────────────────────────────────── */
+[data-theme="gilt"] {
+  --color-background: #e8dcb8;
+  --color-surface: #efe3c2;
+  --color-surface-hi: #dccea3;
+  --color-border: #a88a49;
+  --color-rule: #a88a4950;
+  --color-fg: #1a1408;
+  --color-fg-muted: #6b5a2f;
+  --color-fg-dim: #a79a70;
+  --color-accent: #1f8ba8;
+  --color-accent-hi: #2aa3c2;
+  --color-accent-soft: #bde3ed;
+  --color-danger: #b54a1f;
+  --color-success: #3d7a47;
+}
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -102,5 +147,340 @@ body {
   align-items: center;
   height: 13px;
   line-height: 1;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Ambient background for the Capture view. Three layers of
+   horizontal motion — drifting color bands, a slowly scrolling
+   perspective-ish grid, and a pair of sine waveforms sliding in
+   opposite directions. Theme palettes come in via --ambient-*.
+   ───────────────────────────────────────────────────────────── */
+
+[data-theme="light"] {
+  --ambient-warm: rgba(196, 153, 53, 0.22);
+  --ambient-cool: rgba(31, 139, 168, 0.18);
+  --ambient-third: rgba(10, 10, 10, 0.06);
+  --ambient-grid: rgba(31, 31, 31, 0.045);
+  --ambient-grid-size: 52px;
+  --ambient-wave: rgba(31, 139, 168, 0.22);
+  --ambient-scanline: rgba(10, 10, 10, 0.015);
+  --ambient-sun-core: rgba(230, 226, 216, 0);
+}
+
+[data-theme="dark"] {
+  --ambient-warm: rgba(61, 184, 210, 0.18);
+  --ambient-cool: rgba(80, 60, 180, 0.24);
+  --ambient-third: rgba(235, 230, 216, 0.06);
+  --ambient-grid: rgba(235, 230, 216, 0.05);
+  --ambient-grid-size: 52px;
+  --ambient-wave: rgba(61, 184, 210, 0.25);
+  --ambient-scanline: rgba(235, 230, 216, 0.025);
+  --ambient-sun-core: rgba(235, 230, 216, 0);
+}
+
+[data-theme="vapor"] {
+  --ambient-warm: rgba(255, 106, 213, 0.28);
+  --ambient-cool: rgba(77, 224, 199, 0.22);
+  --ambient-third: rgba(255, 184, 77, 0.18);
+  --ambient-grid: rgba(255, 106, 213, 0.11);
+  --ambient-grid-size: 56px;
+  --ambient-wave: rgba(255, 106, 213, 0.35);
+  --ambient-scanline: rgba(240, 233, 216, 0.04);
+  --ambient-sun-core: rgba(255, 184, 77, 0.22);
+  --ambient-sun-edge: rgba(255, 106, 213, 0.14);
+}
+
+[data-theme="gilt"] {
+  --ambient-warm: rgba(196, 153, 53, 0.32);
+  --ambient-cool: rgba(31, 139, 168, 0.22);
+  --ambient-third: rgba(230, 226, 216, 0.35);
+  --ambient-grid: rgba(26, 20, 8, 0.05);
+  --ambient-grid-size: 56px;
+  --ambient-wave: rgba(31, 139, 168, 0.28);
+  --ambient-scanline: rgba(26, 20, 8, 0.025);
+  --ambient-sun-core: rgba(245, 236, 210, 0.55);
+  --ambient-sun-edge: rgba(196, 153, 53, 0.22);
+}
+
+.ambient-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  isolation: isolate;
+}
+
+/* Drifting color bands — wide horizontal gradient strokes that
+   slide side-to-side at different tempos. Linear motion, blurred
+   just enough that the edges are soft. */
+.ambient-band {
+  position: absolute;
+  left: -60%;
+  width: 220%;
+  height: 34vh;
+  filter: blur(42px);
+  opacity: 0.95;
+  will-change: transform;
+  mix-blend-mode: screen;
+}
+[data-theme="light"] .ambient-band,
+[data-theme="gilt"] .ambient-band {
+  mix-blend-mode: multiply;
+}
+.ambient-band.band-1 {
+  top: 8%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--ambient-warm) 50%,
+    transparent 100%
+  );
+  animation: ambient-band-slide 24s ease-in-out infinite;
+}
+.ambient-band.band-2 {
+  top: 44%;
+  height: 28vh;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--ambient-cool) 50%,
+    transparent 100%
+  );
+  animation: ambient-band-slide 31s ease-in-out infinite reverse;
+  animation-delay: -9s;
+}
+.ambient-band.band-3 {
+  top: 70%;
+  height: 30vh;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--ambient-third) 50%,
+    transparent 100%
+  );
+  animation: ambient-band-slide 38s ease-in-out infinite;
+  animation-delay: -17s;
+}
+
+/* Perspective-tilted grid that scrolls toward the viewer. Gives
+   the classic synthwave "runway" feel without the full horizon. */
+.ambient-grid {
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  bottom: -20%;
+  height: 140%;
+  background-image:
+    linear-gradient(var(--ambient-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ambient-grid) 1px, transparent 1px);
+  background-size: var(--ambient-grid-size) var(--ambient-grid-size);
+  mask-image: linear-gradient(to top, #000 0%, #000 45%, transparent 85%);
+  -webkit-mask-image: linear-gradient(to top, #000 0%, #000 45%, transparent 85%);
+  transform: perspective(900px) rotateX(42deg);
+  transform-origin: 50% 100%;
+  opacity: 0.85;
+  animation: ambient-grid-scroll 14s linear infinite;
+}
+
+/* Sine waveforms slowly phasing across. The SVG path is 3x the
+   visible width and we translate by -33.33% so the loop is
+   seamless — end of frame 3 aligns with start of frame 1. */
+.ambient-wave {
+  position: absolute;
+  left: 0;
+  width: 300%;
+  height: 28vh;
+  pointer-events: none;
+  color: var(--ambient-wave);
+  will-change: transform;
+}
+.ambient-wave.wave-1 {
+  top: 32%;
+  opacity: 0.75;
+  animation: ambient-wave-slide 46s linear infinite;
+}
+.ambient-wave.wave-2 {
+  top: 55%;
+  opacity: 0.5;
+  transform: scaleY(0.6);
+  animation: ambient-wave-slide 62s linear infinite reverse;
+  animation-delay: -20s;
+}
+
+.ambient-scanlines {
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--ambient-scanline) 0,
+    var(--ambient-scanline) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  opacity: 0.6;
+  mix-blend-mode: overlay;
+}
+
+/* Cream/gold sun disc — rendered only for themes that opt in
+   via --ambient-sun-core. Positioned high so it reads as a
+   distant celestial body behind the writing. */
+.ambient-sun {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 14%;
+  width: 44vmin;
+  height: 44vmin;
+  transform: translate(-50%, 0);
+  border-radius: 50%;
+  filter: blur(1px);
+  animation: ambient-sun-pulse 14s ease-in-out infinite;
+}
+[data-theme="vapor"] .ambient-sun,
+[data-theme="gilt"] .ambient-sun {
+  display: block;
+  background: radial-gradient(
+    closest-side,
+    var(--ambient-sun-core) 0%,
+    var(--ambient-sun-edge) 50%,
+    transparent 72%
+  );
+}
+
+@keyframes ambient-band-slide {
+  0%   { transform: translateX(-22%); }
+  50%  { transform: translateX(22%); }
+  100% { transform: translateX(-22%); }
+}
+
+@keyframes ambient-grid-scroll {
+  0%   { background-position: 0 0, 0 0; }
+  100% { background-position: 0 var(--ambient-grid-size),
+                              var(--ambient-grid-size) 0; }
+}
+
+@keyframes ambient-wave-slide {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-33.3333%); }
+}
+
+@keyframes ambient-sun-pulse {
+  0%, 100% { opacity: 0.75; transform: translate(-50%, 0) scale(1); }
+  50%      { opacity: 1;    transform: translate(-50%, -1%) scale(1.03); }
+}
+
+/* Pause every ambient animation when the app window loses focus or
+   the OS requests reduced motion. Saves battery on laptops and
+   honors the accessibility preference. */
+.ambient-layer[data-paused="true"] * {
+  animation-play-state: paused !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ambient-layer *,
+  .capture-textarea,
+  .wordcount-tick,
+  .ambient-dot,
+  .sound-wave > span {
+    animation: none !important;
+  }
+}
+
+/* Capture textarea focus glow — a subtle accent halo plus a soft
+   text-shadow that gives typed glyphs an afterimage. The glow is
+   keyed to the current accent so each theme has its own mood. */
+.capture-textarea {
+  position: relative;
+  caret-color: var(--color-accent);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 14%, transparent);
+  transition: box-shadow 450ms ease, background-color 300ms ease,
+              text-shadow 350ms ease;
+}
+.capture-textarea:focus {
+  box-shadow: inset 0 0 0 1px transparent;
+  animation: capture-focus-glow 4s ease-in-out infinite;
+}
+@keyframes capture-focus-glow {
+  0%, 100% { box-shadow: inset 0 -1px 0 0 color-mix(in srgb, var(--color-accent) 12%, transparent); }
+  50%      { box-shadow: inset 0 -1px 0 0 color-mix(in srgb, var(--color-accent) 40%, transparent); }
+}
+
+/* Keystroke pulse — a 1px accent line at the bottom of the textarea
+   that briefly flares on every input event. Re-keyed on each
+   keystroke so the animation replays from zero without debouncing. */
+.capture-pulse {
+  background: color-mix(in srgb, var(--color-accent) 50%, transparent);
+  transform-origin: 50% 50%;
+  opacity: 0;
+  animation: capture-pulse-flash 520ms ease-out;
+}
+@keyframes capture-pulse-flash {
+  0%   { opacity: 0.0; transform: scaleX(0.2); }
+  25%  { opacity: 0.7; transform: scaleX(1); }
+  100% { opacity: 0;   transform: scaleX(1); }
+}
+
+/* Word-count tick: when the value changes we briefly lift the
+   accent to signal progress. Added via inline style on the node. */
+.wordcount-tick {
+  animation: wordcount-pop 420ms ease-out;
+}
+@keyframes wordcount-pop {
+  0%   { color: var(--color-accent); }
+  100% { color: var(--color-fg-muted); }
+}
+
+/* Ambient indicator dot pulse — still used for the small "playing"
+   corner dot on the thumbnail button, where the sound-wave would be
+   too detailed at 8px square. */
+.ambient-dot {
+  animation: ambient-dot-pulse 2.4s ease-in-out infinite;
+}
+@keyframes ambient-dot-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+
+/* Sound-wave indicator: four vertical bars pulsing out of phase, like
+   a small equalizer. Scales its bars via transform:scaleY so there's
+   no layout thrash, and picks up color from `currentColor` so it
+   inherits the parent button's theming. */
+.sound-wave {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 10px;
+  line-height: 0;
+}
+.sound-wave > span {
+  display: block;
+  width: 2px;
+  height: 100%;
+  background: currentColor;
+  border-radius: 1px;
+  transform: scaleY(0.22);
+  transform-origin: bottom center;
+  animation: sound-wave-pulse 900ms ease-in-out infinite;
+}
+.sound-wave > span:nth-child(1) {
+  animation-duration: 900ms;
+  animation-delay: 0ms;
+}
+.sound-wave > span:nth-child(2) {
+  animation-duration: 1150ms;
+  animation-delay: 220ms;
+}
+.sound-wave > span:nth-child(3) {
+  animation-duration: 720ms;
+  animation-delay: 380ms;
+}
+.sound-wave > span:nth-child(4) {
+  animation-duration: 1300ms;
+  animation-delay: 100ms;
+}
+@keyframes sound-wave-pulse {
+  0%, 100% { transform: scaleY(0.22); }
+  30%      { transform: scaleY(1); }
+  65%      { transform: scaleY(0.55); }
 }
 
