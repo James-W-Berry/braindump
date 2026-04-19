@@ -42,6 +42,13 @@ type YTNamespace = {
   Player: new (
     el: HTMLElement | string,
     opts: {
+      /**
+       * Iframe origin. `https://www.youtube-nocookie.com` has looser
+       * third-party-cookie / storage requirements than the regular
+       * `youtube.com` host, which matters inside WKWebView-backed
+       * Tauri builds where the parent page lives on a custom scheme.
+       */
+      host?: string;
       height: string | number;
       width: string | number;
       videoId: string;
@@ -49,6 +56,7 @@ type YTNamespace = {
       events?: {
         onReady?: (e: { target: YTPlayer }) => void;
         onStateChange?: (e: { target: YTPlayer; data: number }) => void;
+        onError?: (e: { target: YTPlayer; data: number }) => void;
       };
     },
   ) => YTPlayer;
@@ -211,6 +219,13 @@ export function YouTubePlayer({
     loadYTApi().then(() => {
       if (cancelled || !window.YT) return;
       new window.YT.Player(mount, {
+        // Use the privacy-enhanced host — WKWebView inside a packaged
+        // Tauri app ships on a custom URL scheme, which the regular
+        // `youtube.com` embed treats as an unknown origin and rejects
+        // with error 153 ("player configuration error"). The nocookie
+        // host doesn't rely on the same third-party-cookie guarantees,
+        // so it accepts cross-origin postMessage from non-http origins.
+        host: "https://www.youtube-nocookie.com",
         height: "135",
         width: "240",
         videoId,
@@ -220,6 +235,10 @@ export function YouTubePlayer({
           modestbranding: 1,
           rel: 0,
           playsinline: 1,
+          // Mirroring `origin` here and in the IFrame API handshake
+          // lets YouTube's player validate postMessage sources against
+          // our actual document origin, not the default (window.top).
+          origin: window.location.origin,
           // Only seek if the saved position is meaningful — a
           // low-single-digit `start` is often worse than 0 because
           // the intro/pre-roll hasn't loaded yet.
@@ -267,6 +286,15 @@ export function YouTubePlayer({
               // rather than instantly re-ending.
               onProgressRef.current?.(capturedVideoId, 0, true);
             }
+          },
+          onError: ({ data }) => {
+            // Surfaces 2 (bad param), 5 (HTML5 can't play), 100
+            // (not found), 101/150 (embed-disabled by uploader), and
+            // any internal codes like 153 (configuration). Logging
+            // is best-effort; we don't retry from here.
+            console.warn(
+              `[YouTubePlayer] video ${capturedVideoId} error ${data}`,
+            );
           },
         },
       });
