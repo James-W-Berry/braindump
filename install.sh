@@ -17,11 +17,13 @@ ARCH="$(uname -m)"
 say() { printf "\033[36m==>\033[0m %s\n" "$*"; }
 err() { printf "\033[31merror:\033[0m %s\n" "$*" >&2; }
 
-# Match the artifact we want for this platform. Grep-friendly patterns
-# (the final check uses `grep -E` against the asset URL list).
+# Match the artifact we want for this platform. Patterns are matched
+# case-insensitively below (`grep -iE`) because Tauri uses the literal
+# `productName` when naming artifacts — BRAINDUMP ships as
+# `BRAINDUMP_…` in uppercase.
 case "$OS" in
   Darwin)
-    ARTIFACT_PATTERN='Braindump_.*_(universal|aarch64|x64)\.dmg$'
+    ARTIFACT_PATTERN='braindump_.*_(universal|aarch64|x64)\.dmg$'
     ;;
   Linux)
     case "$ARCH" in
@@ -42,11 +44,12 @@ say "fetching latest release metadata"
 RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
 TAG=$(printf '%s' "$RELEASE_JSON" | grep -m1 '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
-# Find the matching asset URL.
+# Find the matching asset URL. `-i` is essential here — artifact names
+# follow the product name's casing, which is upper-case for BRAINDUMP.
 URL=$(printf '%s' "$RELEASE_JSON" \
   | grep -E '"browser_download_url":' \
   | sed -E 's/.*"(https:[^"]+)".*/\1/' \
-  | grep -E "$ARTIFACT_PATTERN" \
+  | grep -iE "$ARTIFACT_PATTERN" \
   | head -1 || true)
 
 if [ -z "${URL:-}" ]; then
