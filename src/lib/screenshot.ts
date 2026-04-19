@@ -12,12 +12,75 @@ export const CAPTURE_SCALE = 2;
  * Snapshot a DOM element to a PNG data URL. `modern-screenshot` handles
  * Tailwind v4 custom properties, gradients, and embedded fonts better than
  * older `html-to-image` / `dom-to-image` libs.
+ *
+ * React-controlled `<select>`s store their selection on the element's
+ * `value` property, not as a `selected` attribute on an option. The DOM
+ * clone the screenshot library produces doesn't carry the property, so
+ * without intervention every select renders its first option. We mirror
+ * the live selection onto attributes for the duration of the capture.
  */
 export async function captureNode(node: HTMLElement): Promise<string> {
-  return await domToPng(node, {
-    scale: CAPTURE_SCALE,
-    backgroundColor: null,
-  });
+  const restore = mirrorFormState(node);
+  try {
+    return await domToPng(node, {
+      scale: CAPTURE_SCALE,
+      backgroundColor: null,
+    });
+  } finally {
+    restore();
+  }
+}
+
+function mirrorFormState(root: HTMLElement): () => void {
+  const undo: Array<() => void> = [];
+
+  const selects =
+    root.tagName === "SELECT"
+      ? [root as HTMLSelectElement]
+      : Array.from(root.querySelectorAll("select"));
+  for (const sel of selects) {
+    const match = Array.from(sel.options).find((o) => o.value === sel.value);
+    if (match && !match.hasAttribute("selected")) {
+      match.setAttribute("selected", "selected");
+      undo.push(() => match.removeAttribute("selected"));
+    }
+  }
+
+  // Same problem for text inputs — React sets `.value`, not the attribute.
+  const inputs =
+    root.tagName === "INPUT" || root.tagName === "TEXTAREA"
+      ? [root as HTMLInputElement | HTMLTextAreaElement]
+      : Array.from(
+          root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+            "input, textarea",
+          ),
+        );
+  for (const el of inputs) {
+    if (el instanceof HTMLInputElement) {
+      if (el.type === "checkbox" || el.type === "radio") continue;
+      if (el.getAttribute("value") !== el.value) {
+        const prev = el.getAttribute("value");
+        el.setAttribute("value", el.value);
+        undo.push(() => {
+          if (prev === null) el.removeAttribute("value");
+          else el.setAttribute("value", prev);
+        });
+      }
+    } else if (el instanceof HTMLTextAreaElement) {
+      // <textarea> renders its value as text content.
+      if (el.textContent !== el.value) {
+        const prev = el.textContent;
+        el.textContent = el.value;
+        undo.push(() => {
+          el.textContent = prev;
+        });
+      }
+    }
+  }
+
+  return () => {
+    for (const fn of undo) fn();
+  };
 }
 
 export interface BackgroundSolid {
