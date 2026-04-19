@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use crate::agent::{LOCAL_MODEL, OLLAMA_BASE_URL};
+use crate::agent::{claude_version, locate_claude, LOCAL_MODEL, OLLAMA_BASE_URL};
 
 const OLLAMA_MACOS_URL: &str = "https://ollama.com/download/Ollama-darwin.zip";
 
@@ -43,15 +43,12 @@ pub struct ClaudeStatus {
 
 #[tauri::command]
 pub async fn check_claude() -> ClaudeStatus {
-    match Command::new("claude").arg("--version").output().await {
-        Ok(out) if out.status.success() => {
-            let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            ClaudeStatus {
-                installed: true,
-                version: if version.is_empty() { None } else { Some(version) },
-            }
-        }
-        _ => ClaudeStatus {
+    match locate_claude().await {
+        Some(path) => ClaudeStatus {
+            installed: true,
+            version: claude_version(&path).await,
+        },
+        None => ClaudeStatus {
             installed: false,
             version: None,
         },

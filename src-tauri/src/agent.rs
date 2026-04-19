@@ -1,10 +1,89 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 pub const LOCAL_MODEL: &str = "qwen2.5:7b";
 pub const OLLAMA_BASE_URL: &str = "http://localhost:11434";
+
+/// Resolve a usable path to the `claude` CLI.
+///
+/// The bundled macOS app inherits a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
+/// rather than the user's interactive shell PATH, so a plain `Command::new("claude")`
+/// fails even when the CLI is installed and works in the terminal. We probe the
+/// common install locations directly, then fall back to the user's login shell
+/// so exotic setups (Volta, Bun, custom prefix) still resolve.
+pub async fn locate_claude() -> Option<PathBuf> {
+    // Fast path — if `claude` is resolvable on the inherited PATH, use it as-is.
+    if probe_claude("claude").await {
+        return Some(PathBuf::from("claude"));
+    }
+
+    for candidate in claude_path_candidates() {
+        if candidate.exists() && probe_claude(&candidate).await {
+            return Some(candidate);
+        }
+    }
+
+    if let Some(resolved) = resolve_claude_via_login_shell().await {
+        if probe_claude(&resolved).await {
+            return Some(resolved);
+        }
+    }
+
+    None
+}
+
+fn claude_path_candidates() -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        // Anthropic's official installer drops the CLI here.
+        v.push(home.join(".claude/local/claude"));
+        v.push(home.join(".local/bin/claude"));
+        v.push(home.join(".npm-global/bin/claude"));
+        v.push(home.join(".volta/bin/claude"));
+        v.push(home.join(".bun/bin/claude"));
+        v.push(home.join(".cargo/bin/claude"));
+    }
+    v.push(PathBuf::from("/opt/homebrew/bin/claude"));
+    v.push(PathBuf::from("/usr/local/bin/claude"));
+    v
+}
+
+async fn probe_claude<P: AsRef<std::ffi::OsStr>>(path: P) -> bool {
+    match Command::new(&path).arg("--version").output().await {
+        Ok(out) => out.status.success(),
+        Err(_) => false,
+    }
+}
+
+async fn resolve_claude_via_login_shell() -> Option<PathBuf> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let out = Command::new(&shell)
+        .arg("-lic")
+        .arg("command -v claude")
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if path.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(path))
+}
+
+pub async fn claude_version(path: &PathBuf) -> Option<String> {
+    let out = Command::new(path).arg("--version").output().await.ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if v.is_empty() { None } else { Some(v) }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExistingItem {
@@ -109,7 +188,11 @@ pub async fn process_capture(
 }
 
 async fn run_claude(model: &str, user_prompt: &str) -> Result<AgentResult, String> {
-    let mut child = Command::new("claude")
+    let claude_path = locate_claude().await.ok_or_else(|| {
+        "Claude CLI not found. Install it from claude.com/claude-code, then relaunch Braindump.".to_string()
+    })?;
+
+    let mut child = Command::new(&claude_path)
         .arg("-p")
         .arg("--model")
         .arg(model)
@@ -121,7 +204,12 @@ async fn run_claude(model: &str, user_prompt: &str) -> Result<AgentResult, Strin
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("failed to spawn claude CLI: {e}. Is it installed and on PATH?"))?;
+        .map_err(|e| {
+            format!(
+                "failed to spawn claude CLI at {}: {e}",
+                claude_path.display()
+            )
+        })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
