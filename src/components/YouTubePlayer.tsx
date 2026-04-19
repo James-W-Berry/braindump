@@ -30,6 +30,7 @@ type YTPlayer = {
   loadVideoById(id: string): void;
   getCurrentTime(): number;
   getDuration(): number;
+  getIframe(): HTMLIFrameElement | null;
   destroy(): void;
 };
 
@@ -235,10 +236,12 @@ export function YouTubePlayer({
           modestbranding: 1,
           rel: 0,
           playsinline: 1,
-          // Mirroring `origin` here and in the IFrame API handshake
-          // lets YouTube's player validate postMessage sources against
-          // our actual document origin, not the default (window.top).
-          origin: window.location.origin,
+          // Intentionally NOT passing `origin`. In a packaged Tauri
+          // app the document origin is `tauri://localhost`, which
+          // YouTube rejects as invalid when it tries to validate the
+          // postMessage target — surfaces as "Error 153" in the player
+          // UI. Omitting origin lets YouTube fall back to `*`, which
+          // browsers accept.
           // Only seek if the saved position is meaningful — a
           // low-single-digit `start` is often worse than 0 because
           // the intro/pre-roll hasn't loaded yet.
@@ -256,6 +259,20 @@ export function YouTubePlayer({
             }
             playerRef.current = target;
             readyRef.current = true;
+            // Ensure the generated iframe has the permissions YouTube's
+            // player expects. Without `encrypted-media` some YouTube
+            // content paths fail with "configuration error" even for
+            // non-DRM'd streams, because the player checks for EME
+            // availability during init.
+            try {
+              const iframe = target.getIframe?.();
+              if (iframe) {
+                iframe.allow =
+                  "autoplay; encrypted-media; fullscreen; picture-in-picture";
+              }
+            } catch {
+              // Ignore — best-effort.
+            }
             try {
               target.setVolume(clamp01(volume) * 100);
               if (playing) target.playVideo();
