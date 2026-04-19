@@ -38,8 +38,96 @@ export const DEFAULT_MODEL_ID = "claude-sonnet-4-6";
 
 export type Provider = "claude" | "ollama";
 
-export const LOCAL_MODEL_ID = "qwen2.5:7b";
-export const LOCAL_MODEL_LABEL = "Qwen 2.5 7B";
+export type LocalTier = "baseline" | "capable" | "reasoning" | "premium";
+
+export interface LocalModelOption {
+  id: string;
+  label: string;
+  paramSize: string;
+  diskGB: number;
+  minRamGB: number;
+  tier: LocalTier;
+  description: string;
+}
+
+export const LOCAL_MODELS: LocalModelOption[] = [
+  {
+    id: "qwen2.5:7b",
+    label: "Qwen 2.5 7B",
+    paramSize: "7B",
+    diskGB: 4.7,
+    minRamGB: 8,
+    tier: "baseline",
+    description:
+      "Fastest, lightest. Good enough for capture + organize on any laptop.",
+  },
+  {
+    id: "gemma3:12b",
+    label: "Gemma 3 12B",
+    paramSize: "12B",
+    diskGB: 8.1,
+    minRamGB: 16,
+    tier: "baseline",
+    description:
+      "Google-tuned. Stronger safety calibration than Qwen — better refusal behavior in sensitive contexts.",
+  },
+  {
+    id: "gemma3:27b",
+    label: "Gemma 3 27B",
+    paramSize: "27B",
+    diskGB: 17,
+    minRamGB: 32,
+    tier: "capable",
+    description:
+      "Sweet spot for 32 GB machines. Best out-of-box safety behavior among runnable-locally options.",
+  },
+  {
+    id: "qwen2.5:32b",
+    label: "Qwen 2.5 32B",
+    paramSize: "32B",
+    diskGB: 19,
+    minRamGB: 32,
+    tier: "capable",
+    description:
+      "Best instruction-following in class. Dense — suits long-form reflection and multi-item extraction.",
+  },
+  {
+    id: "deepseek-r1:32b",
+    label: "DeepSeek R1 32B",
+    paramSize: "32B",
+    diskGB: 20,
+    minRamGB: 32,
+    tier: "reasoning",
+    description:
+      "Deep chain-of-thought. Slower per capture but better at cross-item pattern recognition.",
+  },
+  {
+    id: "qwen2.5:72b",
+    label: "Qwen 2.5 72B",
+    paramSize: "72B",
+    diskGB: 42,
+    minRamGB: 64,
+    tier: "premium",
+    description:
+      "Flagship. Premium quality, slow even on 64 GB. Pick only if you have a Pro/Max machine.",
+  },
+];
+
+export const DEFAULT_LOCAL_MODEL_ID = "qwen2.5:7b";
+
+export function findLocalModel(id: string): LocalModelOption | undefined {
+  return LOCAL_MODELS.find((m) => m.id === id);
+}
+
+/** Pick the strongest catalog model that fits the detected RAM. */
+export function recommendLocalModel(ramGB: number): LocalModelOption {
+  const fits = LOCAL_MODELS.filter((m) => ramGB === 0 || ramGB >= m.minRamGB);
+  // Prefer a "capable" tier if we have the RAM for it.
+  const capable = fits.find((m) => m.tier === "capable");
+  if (capable) return capable;
+  const last = fits[fits.length - 1];
+  return last ?? LOCAL_MODELS[0];
+}
 
 export type PersistedView = "capture" | "items";
 
@@ -63,7 +151,7 @@ const DEFAULTS: Settings = {
   groupBy: "priority",
   hideDone: false,
   model: DEFAULT_MODEL_ID,
-  localModel: LOCAL_MODEL_ID,
+  localModel: DEFAULT_LOCAL_MODEL_ID,
   provider: null,
   activeProjectId: null,
   view: "capture",

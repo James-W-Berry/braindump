@@ -50,6 +50,10 @@ export async function verifyOllamaSetup(model: string): Promise<void> {
   await invoke("verify_ollama_setup", { model });
 }
 
+export async function systemRamGB(): Promise<number> {
+  return invoke<number>("system_ram_gb");
+}
+
 export async function openExternalUrl(url: string): Promise<void> {
   await invoke("open_external_url", { url });
 }

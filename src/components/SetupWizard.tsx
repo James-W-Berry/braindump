@@ -1,5 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, AlertCircle, ArrowRight, ExternalLink } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  AlertCircle,
+  AlertTriangle,
+  ArrowRight,
+  ExternalLink,
+} from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,13 +18,22 @@ import {
   openExternalUrl,
   onSetupProgress,
   formatBytes,
+  systemRamGB,
   type ClaudeStatus,
   type OllamaStatus,
   type SetupProgress,
 } from "@/lib/setup";
-import { LOCAL_MODEL_ID, LOCAL_MODEL_LABEL, type Provider } from "@/lib/settings";
+import {
+  LOCAL_MODELS,
+  DEFAULT_LOCAL_MODEL_ID,
+  findLocalModel,
+  recommendLocalModel,
+  type LocalModelOption,
+  type LocalTier,
+  type Provider,
+} from "@/lib/settings";
 
-type Screen = "choose" | "local-install";
+type Screen = "choose" | "local-pick" | "local-install";
 
 type StepState =
   | { kind: "pending" }
@@ -42,21 +57,37 @@ const INITIAL_INSTALL: InstallState = {
 
 export function SetupWizard({
   onComplete,
+  onPickLocalModel,
+  currentLocalModel,
 }: {
   onComplete: (provider: Provider) => void;
+  onPickLocalModel: (id: string) => void;
+  currentLocalModel: string;
 }) {
   const [screen, setScreen] = useState<Screen>("choose");
   const [claude, setClaude] = useState<ClaudeStatus | null>(null);
   const [ollama, setOllama] = useState<OllamaStatus | null>(null);
   const [checking, setChecking] = useState(true);
+  const [ramGB, setRamGB] = useState<number>(0);
+  const [selectedModelId, setSelectedModelId] =
+    useState<string>(currentLocalModel || DEFAULT_LOCAL_MODEL_ID);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([checkClaude(), checkOllama()])
-      .then(([c, o]) => {
+    Promise.all([checkClaude(), checkOllama(), systemRamGB()])
+      .then(([c, o, ram]) => {
         if (cancelled) return;
         setClaude(c);
         setOllama(o);
+        setRamGB(ram);
+        // Upgrade the default selection once we know the hardware.
+        setSelectedModelId((prev) => {
+          const prevOption = findLocalModel(prev);
+          if (prevOption && (ram === 0 || ram >= prevOption.minRamGB)) {
+            return prev;
+          }
+          return recommendLocalModel(ram).id;
+        });
         setChecking(false);
       })
       .catch(() => {
@@ -88,7 +119,11 @@ export function SetupWizard({
           data-tauri-drag-region
           className="label text-[color:var(--color-fg-muted)] pointer-events-none"
         >
-          {screen === "choose" ? "setup · provider" : "setup · local"}
+          {screen === "choose"
+            ? "setup · provider"
+            : screen === "local-pick"
+              ? "setup · local · model"
+              : "setup · local · install"}
         </span>
       </header>
 
@@ -99,13 +134,25 @@ export function SetupWizard({
             claude={claude}
             ollama={ollama}
             onPickClaude={() => onComplete("claude")}
-            onPickLocal={() => setScreen("local-install")}
+            onPickLocal={() => setScreen("local-pick")}
+          />
+        ) : screen === "local-pick" ? (
+          <LocalPickScreen
+            ramGB={ramGB}
+            selectedId={selectedModelId}
+            onSelect={setSelectedModelId}
+            onContinue={() => {
+              onPickLocalModel(selectedModelId);
+              setScreen("local-install");
+            }}
+            onBack={() => setScreen("choose")}
           />
         ) : (
           <LocalInstallScreen
             initialOllama={ollama}
+            modelId={selectedModelId}
             onDone={() => onComplete("ollama")}
-            onBack={() => setScreen("choose")}
+            onBack={() => setScreen("local-pick")}
           />
         )}
       </main>
@@ -266,15 +313,189 @@ function ProviderCard({
   );
 }
 
+function LocalPickScreen({
+  ramGB,
+  selectedId,
+  onSelect,
+  onContinue,
+  onBack,
+}: {
+  ramGB: number;
+  selectedId: string;
+  onSelect: (id: string) => void;
+  onContinue: () => void;
+  onBack: () => void;
+}) {
+  const grouped = useMemo(() => {
+    const byTier: Record<LocalTier, LocalModelOption[]> = {
+      baseline: [],
+      capable: [],
+      reasoning: [],
+      premium: [],
+    };
+    for (const m of LOCAL_MODELS) byTier[m.tier].push(m);
+    return byTier;
+  }, []);
+
+  const tierOrder: Array<{ key: LocalTier; label: string; hint: string }> = [
+    {
+      key: "baseline",
+      label: "baseline",
+      hint: "runs on any laptop · good for capture + organize",
+    },
+    {
+      key: "capable",
+      label: "capable",
+      hint: "32 GB sweet spot · dense models for long-form reflection",
+    },
+    {
+      key: "reasoning",
+      label: "reasoning",
+      hint: "chain-of-thought · slower per capture, better at cross-item patterns",
+    },
+    {
+      key: "premium",
+      label: "premium",
+      hint: "flagship · only if you have a Pro/Max machine",
+    },
+  ];
+
+  return (
+    <div className="max-w-3xl mx-auto px-10 py-12">
+      <h1 className="text-2xl font-semibold text-[color:var(--color-fg)] mb-2">
+        Pick your local model
+      </h1>
+      <p className="text-sm text-[color:var(--color-fg-muted)] mb-1 leading-relaxed">
+        Larger models understand more nuance but need more RAM and disk.
+        You can change this later in settings.
+      </p>
+      <p className="text-xs text-[color:var(--color-fg-dim)] mb-8">
+        {ramGB > 0
+          ? `detected · ${ramGB} GB RAM`
+          : "couldn't detect RAM — warnings are disabled"}
+      </p>
+
+      <div className="space-y-8 mb-10">
+        {tierOrder.map((t) =>
+          grouped[t.key].length === 0 ? null : (
+            <section key={t.key}>
+              <header className="flex items-baseline gap-3 mb-3">
+                <h3 className="label text-[color:var(--color-fg)]">{t.label}</h3>
+                <div className="flex-1 h-px bg-[color:var(--color-border)]" />
+                <span className="label text-[color:var(--color-fg-dim)]">{t.hint}</span>
+              </header>
+              <div className="space-y-2">
+                {grouped[t.key].map((m) => (
+                  <ModelCard
+                    key={m.id}
+                    model={m}
+                    selected={selectedId === m.id}
+                    ramGB={ramGB}
+                    onSelect={() => onSelect(m.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          ),
+        )}
+      </div>
+
+      <div className="pt-6 border-t border-[color:var(--color-border)] flex items-center justify-between">
+        <button
+          onClick={onBack}
+          className="label text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)] transition-colors"
+        >
+          back
+        </button>
+        <Button onClick={onContinue}>
+          <span>Start setup</span>
+          <ArrowRight size={14} />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ModelCard({
+  model,
+  selected,
+  ramGB,
+  onSelect,
+}: {
+  model: LocalModelOption;
+  selected: boolean;
+  ramGB: number;
+  onSelect: () => void;
+}) {
+  const ramKnown = ramGB > 0;
+  const insufficient = ramKnown && ramGB < model.minRamGB;
+  const tight = ramKnown && !insufficient && ramGB < model.minRamGB + 8;
+
+  return (
+    <button
+      onClick={onSelect}
+      className={`w-full text-left border px-4 py-3.5 transition-colors flex items-start gap-4 ${
+        selected
+          ? "border-[color:var(--color-accent)] bg-[color:var(--color-accent)]/5"
+          : "border-[color:var(--color-border)] hover:border-[color:var(--color-fg-muted)]"
+      }`}
+    >
+      <div className="pt-0.5">
+        <span
+          className={`w-3 h-3 rounded-full border block ${
+            selected
+              ? "border-[color:var(--color-accent)] bg-[color:var(--color-accent)]"
+              : "border-[color:var(--color-border)]"
+          }`}
+        />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-[color:var(--color-fg)]">
+            {model.label}
+          </span>
+          <span className="label text-[color:var(--color-fg-dim)]">
+            {model.paramSize} · ~{model.diskGB} GB · {model.minRamGB} GB RAM
+          </span>
+          {insufficient && (
+            <span
+              className="label label-row text-[color:var(--color-danger)]"
+              title={`Needs ~${model.minRamGB} GB RAM — you have ${ramGB} GB. The model may fail to load or run extremely slowly.`}
+            >
+              <AlertTriangle size={12} />
+              <span>likely won't run</span>
+            </span>
+          )}
+          {tight && (
+            <span
+              className="label label-row text-amber-700 dark:text-amber-400"
+              title={`Fits in ${ramGB} GB but leaves little headroom. Expect slowness and memory pressure.`}
+            >
+              <AlertTriangle size={12} />
+              <span>tight fit</span>
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-[color:var(--color-fg-muted)] mt-1.5 leading-relaxed">
+          {model.description}
+        </p>
+      </div>
+    </button>
+  );
+}
+
 function LocalInstallScreen({
   initialOllama,
+  modelId,
   onDone,
   onBack,
 }: {
   initialOllama: OllamaStatus | null;
+  modelId: string;
   onDone: () => void;
   onBack: () => void;
 }) {
+  const model = findLocalModel(modelId);
   const [state, setState] = useState<InstallState>(INITIAL_INSTALL);
   const [error, setError] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
@@ -304,7 +525,7 @@ function LocalInstallScreen({
       });
 
       try {
-        await runInstallFlow(initialOllama, setState, (next) => {
+        await runInstallFlow(initialOllama, modelId, setState, (next) => {
           activeStageRef.current = next;
         });
         setFinished(true);
@@ -323,7 +544,10 @@ function LocalInstallScreen({
     return () => {
       if (unlisten) unlisten();
     };
-  }, [initialOllama]);
+  }, [initialOllama, modelId]);
+
+  const modelLabel = model?.label ?? modelId;
+  const diskLabel = model ? `~${model.diskGB} GB` : "download";
 
   const steps: Array<{
     key: keyof InstallState;
@@ -332,7 +556,7 @@ function LocalInstallScreen({
   }> = [
     { key: "install", label: "install ollama", sub: "~180 MB" },
     { key: "launch", label: "start service", sub: "localhost:11434" },
-    { key: "pull", label: `download ${LOCAL_MODEL_LABEL}`, sub: "~5 GB" },
+    { key: "pull", label: `download ${modelLabel}`, sub: diskLabel },
     { key: "verify", label: "verify", sub: "test capture" },
   ];
 
@@ -546,6 +770,7 @@ function progressToStep(p: SetupProgress): StepState {
 
 async function runInstallFlow(
   initial: OllamaStatus | null,
+  modelId: string,
   setState: React.Dispatch<React.SetStateAction<InstallState>>,
   setActive: (key: "install" | "launch" | "pull" | "verify" | null) => void,
 ) {
@@ -568,15 +793,15 @@ async function runInstallFlow(
   await launchOllama();
   setState((s) => ({ ...s, launch: { kind: "done", message: "service ready" } }));
 
-  // Step 3 — pull model. Skip if already present.
+  // Step 3 — pull the selected model. Skip if already present.
   const latest = await checkOllama();
-  if (!latest.has_required_model) {
+  if (!latest.models.includes(modelId)) {
     setActive("pull");
     setState((s) => ({
       ...s,
       pull: { kind: "active", message: "starting download" },
     }));
-    await pullOllamaModel(LOCAL_MODEL_ID);
+    await pullOllamaModel(modelId);
     setState((s) => ({ ...s, pull: { kind: "done", message: "downloaded" } }));
   } else {
     setState((s) => ({
@@ -588,7 +813,7 @@ async function runInstallFlow(
   // Step 4 — verify.
   setActive("verify");
   setState((s) => ({ ...s, verify: { kind: "active", message: "testing" } }));
-  await verifyOllamaSetup(LOCAL_MODEL_ID);
+  await verifyOllamaSetup(modelId);
   setState((s) => ({ ...s, verify: { kind: "done", message: "ok" } }));
   setActive(null);
 }

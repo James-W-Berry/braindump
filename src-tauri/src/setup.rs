@@ -473,6 +473,52 @@ pub async fn verify_ollama_setup(app: AppHandle, model: String) -> Result<(), St
 }
 
 #[tauri::command]
+pub async fn system_ram_gb() -> u64 {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .await
+        {
+            if out.status.success() {
+                if let Ok(s) = String::from_utf8(out.stdout) {
+                    if let Ok(bytes) = s.trim().parse::<u64>() {
+                        // Round to the nearest GiB — Mac RAM tiers are discrete
+                        // (8/16/24/32/48/64/96/128) so rounding reports the
+                        // configured size rather than 31 for a 32 GB machine.
+                        return ((bytes as f64) / 1024.0 / 1024.0 / 1024.0).round() as u64;
+                    }
+                }
+            }
+        }
+        0
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(contents) = tokio::fs::read_to_string("/proc/meminfo").await {
+            for line in contents.lines() {
+                if let Some(rest) = line.strip_prefix("MemTotal:") {
+                    let kb: u64 = rest
+                        .trim()
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("0")
+                        .parse()
+                        .unwrap_or(0);
+                    return ((kb as f64) / 1024.0 / 1024.0).round() as u64;
+                }
+            }
+        }
+        0
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        0
+    }
+}
+
+#[tauri::command]
 pub async fn open_external_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {

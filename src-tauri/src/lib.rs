@@ -48,6 +48,7 @@ pub fn run() {
             setup::launch_ollama,
             setup::pull_ollama_model,
             setup::verify_ollama_setup,
+            setup::system_ram_gb,
             setup::open_external_url,
         ])
         .run(tauri::generate_context!())

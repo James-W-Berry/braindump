@@ -5,7 +5,8 @@ import {
   FONT_LABELS,
   FONT_SIZES,
   AVAILABLE_MODELS,
-  LOCAL_MODEL_LABEL,
+  LOCAL_MODELS,
+  findLocalModel,
   type Settings,
 } from "@/lib/settings";
 import type { UseUpdater } from "@/lib/updater";
@@ -33,6 +34,7 @@ export function SettingsPopover({
 
   const fontIdx = FONT_SIZES.indexOf(settings.fontSize);
   const activeModel = AVAILABLE_MODELS.find((m) => m.id === settings.model);
+  const activeLocalModel = findLocalModel(settings.localModel);
 
   return (
     <div className="relative" ref={ref}>
@@ -81,10 +83,35 @@ export function SettingsPopover({
             </div>
             <p className="text-xs text-[color:var(--color-fg-muted)] mt-2 leading-relaxed">
               {settings.provider === "ollama"
-                ? `Runs ${LOCAL_MODEL_LABEL} locally. Nothing leaves your device.`
+                ? `Runs ${activeLocalModel?.label ?? settings.localModel} locally. Nothing leaves your device.`
                 : "Sent to Anthropic's API for processing."}
             </p>
           </Section>
+
+          {settings.provider === "ollama" && (
+            <Section label="local model">
+              <select
+                value={settings.localModel}
+                onChange={(e) => onUpdate("localModel", e.target.value)}
+                className="w-full bg-transparent border-b border-[color:var(--color-border)] px-0 h-8 text-sm focus:outline-none focus:border-[color:var(--color-accent)]"
+              >
+                {LOCAL_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label} · {m.paramSize} · ~{m.diskGB} GB
+                  </option>
+                ))}
+              </select>
+              {activeLocalModel && (
+                <p className="text-xs text-[color:var(--color-fg-muted)] mt-2 leading-relaxed">
+                  {activeLocalModel.description}
+                </p>
+              )}
+              <p className="text-xs text-[color:var(--color-fg-dim)] mt-2 leading-relaxed">
+                Switching doesn't auto-download. Re-run setup (Provider → switch)
+                to pull a new model.
+              </p>
+            </Section>
+          )}
 
           {settings.provider === "claude" && (
             <Section label="claude model">
