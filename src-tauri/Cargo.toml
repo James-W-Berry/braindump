@@ -1,6 +1,6 @@
 [package]
 name = "braindump"
-version = "1.2.1"
+version = "1.2.2"
 description = "Quick capture, agent-organized."
 authors = ["James-W-Berry"]
 edition = "2021"
