@@ -53,13 +53,15 @@ curl -fsSL https://raw.githubusercontent.com/James-W-Berry/braindump/main/instal
 
 This downloads the latest release, moves the app to `/Applications`, and strips Gatekeeper's quarantine attribute (Braindump isn't code-signed with an Apple Developer ID yet, so macOS would otherwise block the unsigned app on first launch).
 
-**Linux:**
+**Linux** (Ubuntu / Debian / Arch / Fedora — anything that runs AppImages):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/James-W-Berry/braindump/main/install.sh | bash
 ```
 
-Same script — drops an `.AppImage` into `~/.local/bin/`.
+Same script — drops a portable `.AppImage` into `~/.local/bin/braindump.AppImage`. The AppImage bundles everything it needs, so there are no distro-specific package requirements. Tested on Arch, Ubuntu, Fedora, and Debian.
+
+If you'd rather install the `.deb` manually (Ubuntu/Debian only), grab it from the [release page](https://github.com/James-W-Berry/braindump/releases/latest).
 
 **Windows:**
 
