@@ -58,6 +58,11 @@ export async function createProject(name: string, description?: string): Promise
   return rows[0];
 }
 
+export async function deleteProject(id: number): Promise<void> {
+  const d = await db();
+  await d.execute("DELETE FROM projects WHERE id = ?", [id]);
+}
+
 export async function createCapture(
   projectId: number,
   rawText: string,

@@ -19,6 +19,7 @@ import { EditableText, EditableSelect, EditableCombo } from "@/components/Editab
 import {
   listProjects,
   createProject,
+  deleteProject,
   createCapture,
   markCaptureProcessed,
   listItems,
@@ -55,6 +56,7 @@ export default function App() {
   const [trashItems, setTrashItems] = useState<Item[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -164,6 +166,26 @@ export default function App() {
     setShowNewProject(false);
   }
 
+  async function handleConfirmDeleteProject() {
+    if (!deletingProject) return;
+    const id = deletingProject.id;
+    try {
+      await deleteProject(id);
+      const remaining = projects.filter((p) => p.id !== id);
+      setProjects(remaining);
+      if (activeProjectId === id) {
+        setActiveProjectId(remaining[0]?.id ?? null);
+        setItems([]);
+        setTrashItems([]);
+        setLastResult(null);
+      }
+      setDeletingProject(null);
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+      setDeletingProject(null);
+    }
+  }
+
   async function handleToggleDone(id: number, current: Item["status"]) {
     const next = current === "done" ? "open" : "done";
     await updateItemStatus(id, next);
@@ -248,7 +270,13 @@ export default function App() {
   }
 
   if (settings.provider == null) {
-    return <SetupWizard onComplete={(p) => update("provider", p)} />;
+    return (
+      <SetupWizard
+        currentLocalModel={settings.localModel}
+        onPickLocalModel={(id) => update("localModel", id)}
+        onComplete={(p) => update("provider", p)}
+      />
+    );
   }
 
   return (
@@ -258,6 +286,8 @@ export default function App() {
         activeProjectId={activeProjectId}
         onPickProject={setActiveProjectId}
         onNewProject={() => setShowNewProject(true)}
+        onDeleteProject={() => activeProject && setDeletingProject(activeProject)}
+        canDeleteProject={projects.length > 1 && activeProject != null}
         view={view === "processing" ? "capture" : view}
         onSetView={setView}
         settings={settings}
@@ -315,6 +345,14 @@ export default function App() {
           onCancel={() => setShowNewProject(false)}
         />
       )}
+
+      {deletingProject && (
+        <DeleteProjectDialog
+          project={deletingProject}
+          onConfirm={handleConfirmDeleteProject}
+          onCancel={() => setDeletingProject(null)}
+        />
+      )}
     </div>
   );
 }
@@ -324,6 +362,8 @@ function Header({
   activeProjectId,
   onPickProject,
   onNewProject,
+  onDeleteProject,
+  canDeleteProject,
   view,
   onSetView,
   settings,
@@ -335,6 +375,8 @@ function Header({
   activeProjectId: number | null;
   onPickProject: (id: number) => void;
   onNewProject: () => void;
+  onDeleteProject: () => void;
+  canDeleteProject: boolean;
   view: "capture" | "items";
   onSetView: (v: View) => void;
   settings: ReturnType<typeof useSettings>["settings"];
@@ -410,6 +452,18 @@ function Header({
           className="text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-accent)] transition-colors disabled:opacity-50 self-center"
         >
           <Plus size={14} />
+        </button>
+        <button
+          onClick={onDeleteProject}
+          disabled={disabled || !canDeleteProject}
+          title={
+            canDeleteProject
+              ? "Delete project"
+              : "At least one project is required"
+          }
+          className="text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-danger)] transition-colors disabled:opacity-30 disabled:pointer-events-none self-center"
+        >
+          <Trash2 size={13} />
         </button>
       </div>
 
@@ -1140,6 +1194,41 @@ function groupItems(items: Item[], by: GroupBy) {
       label: key === "—" ? "untagged" : key,
       items: gItems,
     }));
+}
+
+function DeleteProjectDialog({
+  project,
+  onConfirm,
+  onCancel,
+}: {
+  project: Project;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="w-[420px] bg-[color:var(--color-surface)] border border-[color:var(--color-border)] p-5">
+        <div className="label text-[color:var(--color-danger)] mb-3">
+          Delete project
+        </div>
+        <p className="text-sm text-[color:var(--color-fg)] leading-relaxed mb-2">
+          Delete <span className="font-semibold">{project.name}</span>?
+        </p>
+        <p className="text-xs text-[color:var(--color-fg-muted)] leading-relaxed mb-4">
+          This permanently removes the project, all its captures, and all its
+          items — including anything in the trash. This cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={onConfirm}>
+            Delete
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function NewProjectDialog({
