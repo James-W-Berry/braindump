@@ -69,35 +69,28 @@ curl -fsSL -o "$TMP/$FILENAME" "$URL"
 case "$OS" in
   Darwin)
     say "mounting dmg"
-    PLIST_OUT="$TMP/mount.plist"
-    if ! hdiutil attach -quiet -nobrowse -plist "$TMP/$FILENAME" > "$PLIST_OUT"; then
+    HDIUTIL_OUT="$TMP/hdiutil.out"
+    # Plain text output is significantly easier to parse than
+    # `-plist`, whose XML payload has been seen to land empty when
+    # combined with `-quiet` on some macOS versions. The text format
+    # is stable: one line per system entity, tab-separated, with the
+    # mount path (when present) as the last field.
+    if ! hdiutil attach -nobrowse "$TMP/$FILENAME" > "$HDIUTIL_OUT" 2>&1; then
       err "hdiutil attach failed"
+      /usr/bin/sed 's/^/  /' "$HDIUTIL_OUT" >&2
       exit 1
     fi
 
-    # Extract the mount point from the plist. The awk approach used
-    # previously was brittle — it assumed a specific line layout for
-    # `<key>mount-point</key>` → `<string>…</string>`. Prefer plutil
-    # (a macOS core tool) and iterate the `system-entities` array
-    # since the mountable entity isn't always at index 0. Fall back
-    # to a regex sweep if plutil somehow isn't present.
-    MOUNT_POINT=""
-    if command -v /usr/bin/plutil >/dev/null; then
-      for i in 0 1 2 3 4 5; do
-        mp=$(/usr/bin/plutil -extract "system-entities.$i.mount-point" raw -o - "$PLIST_OUT" 2>/dev/null || true)
-        if [ -n "$mp" ] && [ -d "$mp" ]; then
-          MOUNT_POINT="$mp"
-          break
-        fi
-      done
-    fi
-    if [ -z "$MOUNT_POINT" ]; then
-      MOUNT_POINT=$(/usr/bin/sed -nE 's|.*<string>(/Volumes/[^<]+)</string>.*|\1|p' "$PLIST_OUT" | head -1)
-    fi
+    # Pick up the /Volumes/… path from whichever line has one,
+    # stripping any trailing whitespace.
+    MOUNT_POINT=$(/usr/bin/grep -oE '/Volumes/.*' "$HDIUTIL_OUT" \
+      | head -1 \
+      | /usr/bin/sed -E 's/[[:space:]]+$//')
+
     if [ -z "${MOUNT_POINT:-}" ] || [ ! -d "$MOUNT_POINT" ]; then
       err "failed to locate mount point (dmg attached but path not found)"
-      err "hdiutil plist:"
-      /usr/bin/sed 's/^/  /' "$PLIST_OUT" >&2
+      err "hdiutil output:"
+      /usr/bin/sed 's/^/  /' "$HDIUTIL_OUT" >&2
       exit 1
     fi
 
