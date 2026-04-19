@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 export interface ClaudeStatus {
   installed: boolean;
   version: string | null;
+  resolved_path: string | null;
 }
 
 export interface OllamaStatus {
@@ -26,8 +27,12 @@ export type SetupProgress =
     }
   | { stage: "verify"; message: string };
 
-export async function checkClaude(): Promise<ClaudeStatus> {
-  return invoke<ClaudeStatus>("check_claude");
+export async function checkClaude(
+  claudePath?: string | null,
+): Promise<ClaudeStatus> {
+  return invoke<ClaudeStatus>("check_claude", {
+    claudePath: claudePath?.trim() ? claudePath.trim() : null,
+  });
 }
 
 export async function checkOllama(): Promise<OllamaStatus> {

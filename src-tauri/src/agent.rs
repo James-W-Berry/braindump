@@ -1,22 +1,71 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tokio::sync::OnceCell;
 
 pub const LOCAL_MODEL: &str = "qwen2.5:7b";
 pub const OLLAMA_BASE_URL: &str = "http://localhost:11434";
 
+/// Cached PATH as the user's login shell would expose it. GUI-launched macOS
+/// `.app` bundles get the minimal launchd PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
+/// rather than the user's interactive shell PATH, so spawning `claude` — which
+/// is usually a `#!/usr/bin/env node` shebang script — fails because `node`
+/// isn't on PATH. We resolve the shell PATH once and reuse it whenever we
+/// spawn `claude`.
+static SHELL_PATH: OnceCell<Option<String>> = OnceCell::const_new();
+
+async fn shell_path() -> Option<String> {
+    SHELL_PATH
+        .get_or_init(|| async { resolve_shell_path().await })
+        .await
+        .clone()
+}
+
+async fn resolve_shell_path() -> Option<String> {
+    // On Windows there's no `$SHELL` convention; bail cleanly.
+    let shell = std::env::var("SHELL").ok()?;
+    let out = Command::new(&shell)
+        .arg("-lic")
+        .arg("printf '%s' \"$PATH\"")
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+/// Build a `Command` for `claude` that will find `node` and friends. We set
+/// PATH to the user's login-shell PATH when available; otherwise the inherited
+/// one is used unchanged.
+async fn claude_command(path: &Path) -> Command {
+    let mut cmd = Command::new(path);
+    if let Some(p) = shell_path().await {
+        cmd.env("PATH", p);
+    }
+    cmd
+}
+
 /// Resolve a usable path to the `claude` CLI.
 ///
-/// The bundled macOS app inherits a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
-/// rather than the user's interactive shell PATH, so a plain `Command::new("claude")`
-/// fails even when the CLI is installed and works in the terminal. We probe the
-/// common install locations directly, then fall back to the user's login shell
-/// so exotic setups (Volta, Bun, custom prefix) still resolve.
-pub async fn locate_claude() -> Option<PathBuf> {
-    // Fast path — if `claude` is resolvable on the inherited PATH, use it as-is.
-    if probe_claude("claude").await {
+/// Resolution order:
+/// 1. User-provided override (from settings).
+/// 2. Bare `claude` on the effective PATH (works when PATH is rich).
+/// 3. A curated list of common install locations (Anthropic installer,
+///    Homebrew, cargo, volta, bun, nvm, npm-global, …).
+/// 4. `$SHELL -lic 'command -v claude'` — catches arbitrary user setups.
+pub async fn locate_claude(override_path: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(p) = override_path.filter(|p| !p.as_os_str().is_empty()) {
+        if probe_claude(&p).await {
+            return Some(p);
+        }
+    }
+
+    if probe_claude(Path::new("claude")).await {
         return Some(PathBuf::from("claude"));
     }
 
@@ -38,28 +87,44 @@ pub async fn locate_claude() -> Option<PathBuf> {
 fn claude_path_candidates() -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = Vec::new();
     if let Some(home) = dirs::home_dir() {
-        // Anthropic's official installer drops the CLI here.
+        // Anthropic's official installer.
         v.push(home.join(".claude/local/claude"));
+        // Common per-user bin dirs.
         v.push(home.join(".local/bin/claude"));
         v.push(home.join(".npm-global/bin/claude"));
         v.push(home.join(".volta/bin/claude"));
         v.push(home.join(".bun/bin/claude"));
         v.push(home.join(".cargo/bin/claude"));
+        // nvm — scan every installed node version.
+        v.extend(scan_nvm_versions(&home));
+        // asdf shims.
+        v.push(home.join(".asdf/shims/claude"));
     }
     v.push(PathBuf::from("/opt/homebrew/bin/claude"));
     v.push(PathBuf::from("/usr/local/bin/claude"));
     v
 }
 
-async fn probe_claude<P: AsRef<std::ffi::OsStr>>(path: P) -> bool {
-    match Command::new(&path).arg("--version").output().await {
+fn scan_nvm_versions(home: &Path) -> Vec<PathBuf> {
+    let nvm_versions = home.join(".nvm/versions/node");
+    let Ok(entries) = std::fs::read_dir(&nvm_versions) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path().join("bin/claude"))
+        .collect()
+}
+
+async fn probe_claude(path: &Path) -> bool {
+    match claude_command(path).await.arg("--version").output().await {
         Ok(out) => out.status.success(),
         Err(_) => false,
     }
 }
 
 async fn resolve_claude_via_login_shell() -> Option<PathBuf> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let shell = std::env::var("SHELL").ok()?;
     let out = Command::new(&shell)
         .arg("-lic")
         .arg("command -v claude")
@@ -76,8 +141,13 @@ async fn resolve_claude_via_login_shell() -> Option<PathBuf> {
     Some(PathBuf::from(path))
 }
 
-pub async fn claude_version(path: &PathBuf) -> Option<String> {
-    let out = Command::new(path).arg("--version").output().await.ok()?;
+pub async fn claude_version(path: &Path) -> Option<String> {
+    let out = claude_command(path)
+        .await
+        .arg("--version")
+        .output()
+        .await
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -172,6 +242,7 @@ pub async fn process_capture(
     raw_text: String,
     model: String,
     provider: String,
+    claude_path: Option<String>,
 ) -> Result<AgentResult, String> {
     let user_prompt = build_user_prompt(
         &project_name,
@@ -181,18 +252,23 @@ pub async fn process_capture(
     );
 
     match provider.as_str() {
-        "claude" => run_claude(&model, &user_prompt).await,
+        "claude" => run_claude(&model, &user_prompt, claude_path.map(PathBuf::from)).await,
         "ollama" => run_ollama(&model, &user_prompt).await,
         other => Err(format!("unknown provider: {other}")),
     }
 }
 
-async fn run_claude(model: &str, user_prompt: &str) -> Result<AgentResult, String> {
-    let claude_path = locate_claude().await.ok_or_else(|| {
+async fn run_claude(
+    model: &str,
+    user_prompt: &str,
+    override_path: Option<PathBuf>,
+) -> Result<AgentResult, String> {
+    let claude_path = locate_claude(override_path).await.ok_or_else(|| {
         "Claude CLI not found. Install it from claude.com/claude-code, then relaunch Braindump.".to_string()
     })?;
 
-    let mut child = Command::new(&claude_path)
+    let mut child = claude_command(&claude_path)
+        .await
         .arg("-p")
         .arg("--model")
         .arg(model)

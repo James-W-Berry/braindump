@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { SettingsPopover } from "@/components/SettingsPopover";
 import { ProcessingView } from "@/components/ProcessingView";
 import { SetupWizard } from "@/components/SetupWizard";
+import { ScreenshotStudio } from "@/components/ScreenshotStudio";
 import { EditableText, EditableSelect, EditableCombo } from "@/components/Editable";
 import {
   listProjects,
@@ -57,7 +58,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  // Ephemeral: true when the user re-opens the provider picker from settings
+  // after initial setup. Doesn't nullify `settings.provider`, so a cancel
+  // leaves the previous choice intact.
+  const [showProviderWizard, setShowProviderWizard] = useState(false);
+  const [showScreenshotStudio, setShowScreenshotStudio] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const appRootRef = useRef<HTMLDivElement>(null);
+  const mainContentRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     (async () => {
@@ -130,6 +138,7 @@ export default function App() {
         rawText: draft,
         model: activeModel,
         provider: settings.provider ?? "claude",
+        claudePath: settings.claudeCliPath,
       });
       // Only honor related_item_ids that reference items we actually sent to
       // the agent — local models (and occasionally Claude) can invent IDs.
@@ -269,18 +278,26 @@ export default function App() {
     setItems(await listItems(activeProjectId));
   }
 
-  if (settings.provider == null) {
+  const firstLaunch = settings.provider == null;
+  if (firstLaunch || showProviderWizard) {
     return (
       <SetupWizard
         currentLocalModel={settings.localModel}
+        claudeCliPath={settings.claudeCliPath}
+        onUpdateClaudeCliPath={(p) => update("claudeCliPath", p)}
         onPickLocalModel={(id) => update("localModel", id)}
-        onComplete={(p) => update("provider", p)}
+        onComplete={(p) => {
+          update("provider", p);
+          setShowProviderWizard(false);
+        }}
+        onCancel={firstLaunch ? undefined : () => setShowProviderWizard(false)}
       />
     );
   }
 
   return (
     <div className="flex flex-col h-full">
+      <div ref={appRootRef} className="flex flex-col flex-1 min-h-0">
       <Header
         projects={projects}
         activeProjectId={activeProjectId}
@@ -292,6 +309,8 @@ export default function App() {
         onSetView={setView}
         settings={settings}
         onUpdateSettings={update}
+        onOpenProviderWizard={() => setShowProviderWizard(true)}
+        onOpenScreenshot={() => setShowScreenshotStudio(true)}
         updater={updater}
         disabled={view === "processing"}
       />
@@ -305,7 +324,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 overflow-hidden">
+      <main ref={mainContentRef} className="flex-1 overflow-hidden">
         {view === "processing" ? (
           <ProcessingView projectName={activeProject?.name ?? ""} />
         ) : view === "capture" ? (
@@ -339,6 +358,8 @@ export default function App() {
         )}
       </main>
 
+      </div>
+
       {showNewProject && (
         <NewProjectDialog
           onCreate={handleCreateProject}
@@ -351,6 +372,16 @@ export default function App() {
           project={deletingProject}
           onConfirm={handleConfirmDeleteProject}
           onCancel={() => setDeletingProject(null)}
+        />
+      )}
+
+      {showScreenshotStudio && (
+        <ScreenshotStudio
+          targets={{
+            whole: appRootRef.current,
+            content: mainContentRef.current,
+          }}
+          onClose={() => setShowScreenshotStudio(false)}
         />
       )}
     </div>
@@ -368,6 +399,8 @@ function Header({
   onSetView,
   settings,
   onUpdateSettings,
+  onOpenProviderWizard,
+  onOpenScreenshot,
   updater,
   disabled,
 }: {
@@ -381,6 +414,8 @@ function Header({
   onSetView: (v: View) => void;
   settings: ReturnType<typeof useSettings>["settings"];
   onUpdateSettings: ReturnType<typeof useSettings>["update"];
+  onOpenProviderWizard: () => void;
+  onOpenScreenshot: () => void;
   updater: ReturnType<typeof useUpdater>;
   disabled: boolean;
 }) {
@@ -508,6 +543,8 @@ function Header({
           <SettingsPopover
             settings={settings}
             onUpdate={onUpdateSettings}
+            onOpenProviderWizard={onOpenProviderWizard}
+            onOpenScreenshot={onOpenScreenshot}
             updater={updater}
           />
         </div>

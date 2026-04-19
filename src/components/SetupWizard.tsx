@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowRight,
   ExternalLink,
+  X,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
@@ -59,10 +60,16 @@ export function SetupWizard({
   onComplete,
   onPickLocalModel,
   currentLocalModel,
+  claudeCliPath,
+  onUpdateClaudeCliPath,
+  onCancel,
 }: {
   onComplete: (provider: Provider) => void;
   onPickLocalModel: (id: string) => void;
   currentLocalModel: string;
+  claudeCliPath: string | null;
+  onUpdateClaudeCliPath: (path: string | null) => void;
+  onCancel?: () => void;
 }) {
   const [screen, setScreen] = useState<Screen>("choose");
   const [claude, setClaude] = useState<ClaudeStatus | null>(null);
@@ -72,9 +79,19 @@ export function SetupWizard({
   const [selectedModelId, setSelectedModelId] =
     useState<string>(currentLocalModel || DEFAULT_LOCAL_MODEL_ID);
 
+  async function refreshClaude(overridePath: string | null) {
+    const status = await checkClaude(overridePath);
+    setClaude(status);
+    return status;
+  }
+
   useEffect(() => {
     let cancelled = false;
-    Promise.all([checkClaude(), checkOllama(), systemRamGB()])
+    Promise.all([
+      checkClaude(claudeCliPath),
+      checkOllama(),
+      systemRamGB(),
+    ])
       .then(([c, o, ram]) => {
         if (cancelled) return;
         setClaude(c);
@@ -97,7 +114,8 @@ export function SetupWizard({
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Re-probe whenever the user edits the override path.
+  }, [claudeCliPath]);
 
   return (
     <div className="h-full flex flex-col bg-[color:var(--color-background)]">
@@ -125,6 +143,18 @@ export function SetupWizard({
               ? "setup · local · model"
               : "setup · local · install"}
         </span>
+        {onCancel && (
+          <>
+            <div className="flex-1" data-tauri-drag-region />
+            <button
+              onClick={onCancel}
+              title="close without changing provider"
+              className="text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)] transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </>
+        )}
       </header>
 
       <main className="flex-1 overflow-auto scroll-soft">
@@ -133,6 +163,9 @@ export function SetupWizard({
             checking={checking}
             claude={claude}
             ollama={ollama}
+            claudeCliPath={claudeCliPath}
+            onUpdateClaudeCliPath={onUpdateClaudeCliPath}
+            onRefreshClaude={refreshClaude}
             onPickClaude={() => onComplete("claude")}
             onPickLocal={() => setScreen("local-pick")}
           />
@@ -164,12 +197,18 @@ function ChooseScreen({
   checking,
   claude,
   ollama,
+  claudeCliPath,
+  onUpdateClaudeCliPath,
+  onRefreshClaude,
   onPickClaude,
   onPickLocal,
 }: {
   checking: boolean;
   claude: ClaudeStatus | null;
   ollama: OllamaStatus | null;
+  claudeCliPath: string | null;
+  onUpdateClaudeCliPath: (path: string | null) => void;
+  onRefreshClaude: (path: string | null) => Promise<ClaudeStatus>;
   onPickClaude: () => void;
   onPickLocal: () => void;
 }) {
@@ -210,8 +249,19 @@ function ChooseScreen({
           }
           hint={
             !checking && !claude?.installed
-              ? "Install the Claude CLI first: claude.com/claude-code"
-              : undefined
+              ? "Install from claude.com/claude-code, or point Braindump at an existing binary below."
+              : claude?.installed && claude.resolved_path
+                ? claude.resolved_path
+                : undefined
+          }
+          extra={
+            !checking && !claude?.installed ? (
+              <ManualClaudePath
+                value={claudeCliPath}
+                onSave={(p) => onUpdateClaudeCliPath(p)}
+                onRefresh={onRefreshClaude}
+              />
+            ) : null
           }
           cta="Use Claude"
           disabled={checking || !claude?.installed}
@@ -256,6 +306,7 @@ function ProviderCard({
   pitch,
   status,
   hint,
+  extra,
   cta,
   disabled,
   onClick,
@@ -265,6 +316,7 @@ function ProviderCard({
   pitch: string;
   status: { tone: StatusTone; label: string };
   hint?: string;
+  extra?: React.ReactNode;
   cta: string;
   disabled?: boolean;
   onClick: () => void;
@@ -292,10 +344,11 @@ function ProviderCard({
         {pitch}
       </p>
       {hint && (
-        <p className="text-xs text-[color:var(--color-fg-dim)] leading-relaxed mb-5">
+        <p className="text-xs text-[color:var(--color-fg-dim)] leading-relaxed mb-5 break-all">
           {hint}
         </p>
       )}
+      {extra}
       <div className="flex-1" />
       <div className="flex items-center gap-2 mb-4">
         <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
@@ -309,6 +362,82 @@ function ProviderCard({
         <span>{cta}</span>
         <ArrowRight size={14} />
       </Button>
+    </div>
+  );
+}
+
+function ManualClaudePath({
+  value,
+  onSave,
+  onRefresh,
+}: {
+  value: string | null;
+  onSave: (path: string | null) => void;
+  onRefresh: (path: string | null) => Promise<ClaudeStatus>;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  const [probing, setProbing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(value ?? "");
+  }, [value]);
+
+  async function attempt() {
+    const normalized = draft.trim();
+    if (!normalized) {
+      onSave(null);
+      setError(null);
+      return;
+    }
+    setProbing(true);
+    setError(null);
+    try {
+      onSave(normalized);
+      const status = await onRefresh(normalized);
+      if (!status.installed) {
+        setError("Couldn't run that binary. Check the path and try again.");
+      }
+    } finally {
+      setProbing(false);
+    }
+  }
+
+  return (
+    <div className="mb-5">
+      <label className="label text-[color:var(--color-fg-muted)] block mb-2">
+        locate manually
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="/path/to/claude"
+          spellCheck={false}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              attempt();
+            }
+          }}
+          className="flex-1 bg-transparent border-b border-[color:var(--color-border)] px-0 h-8 text-xs font-mono focus:outline-none focus:border-[color:var(--color-accent)] placeholder:text-[color:var(--color-fg-dim)]"
+        />
+        <button
+          onClick={attempt}
+          disabled={probing}
+          className="label text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-accent)] transition-colors disabled:opacity-50"
+        >
+          {probing ? "checking…" : "check"}
+        </button>
+      </div>
+      <p className="text-xs text-[color:var(--color-fg-dim)] mt-2 leading-relaxed">
+        Run <span className="font-mono">which claude</span> in your terminal to find it.
+      </p>
+      {error && (
+        <p className="text-xs text-[color:var(--color-danger)] mt-2 leading-relaxed">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

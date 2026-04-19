@@ -1,4 +1,5 @@
 mod agent;
+mod screenshot;
 mod setup;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
@@ -50,6 +51,7 @@ pub fn run() {
             setup::verify_ollama_setup,
             setup::system_ram_gb,
             setup::open_external_url,
+            screenshot::save_png_to_desktop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

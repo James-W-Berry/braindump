@@ -142,6 +142,12 @@ export interface Settings {
   provider: Provider | null;
   activeProjectId: number | null;
   view: PersistedView;
+  /**
+   * Optional absolute path to the `claude` CLI. Set by the user when the
+   * bundled app's auto-detection can't find their install (e.g. an nvm node
+   * version that isn't on the hardcoded candidate list).
+   */
+  claudeCliPath: string | null;
 }
 
 const DEFAULTS: Settings = {
@@ -155,6 +161,7 @@ const DEFAULTS: Settings = {
   provider: null,
   activeProjectId: null,
   view: "capture",
+  claudeCliPath: null,
 };
 
 const STORAGE_KEY = "braindump.settings";

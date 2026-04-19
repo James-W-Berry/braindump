@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Settings as SettingsIcon, Minus, Plus, Download, Check } from "lucide-react";
+import {
+  Settings as SettingsIcon,
+  Minus,
+  Plus,
+  Download,
+  Check,
+  Camera,
+} from "lucide-react";
 import {
   type FontFamily,
   FONT_LABELS,
@@ -14,10 +21,14 @@ import type { UseUpdater } from "@/lib/updater";
 export function SettingsPopover({
   settings,
   onUpdate,
+  onOpenProviderWizard,
+  onOpenScreenshot,
   updater,
 }: {
   settings: Settings;
   onUpdate: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+  onOpenProviderWizard: () => void;
+  onOpenScreenshot: () => void;
   updater: UseUpdater;
 }) {
   const [open, setOpen] = useState(false);
@@ -73,7 +84,7 @@ export function SettingsPopover({
               </span>
               <button
                 onClick={() => {
-                  onUpdate("provider", null);
+                  onOpenProviderWizard();
                   setOpen(false);
                 }}
                 className="label text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-accent)] transition-colors"
@@ -114,24 +125,37 @@ export function SettingsPopover({
           )}
 
           {settings.provider === "claude" && (
-            <Section label="claude model">
-              <select
-                value={settings.model}
-                onChange={(e) => onUpdate("model", e.target.value)}
-                className="w-full bg-transparent border-b border-[color:var(--color-border)] px-0 h-8 text-sm focus:outline-none focus:border-[color:var(--color-accent)]"
-              >
-                {AVAILABLE_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              {activeModel && (
-                <p className="text-xs text-[color:var(--color-fg-muted)] mt-2 leading-relaxed">
-                  {activeModel.description}
+            <>
+              <Section label="claude model">
+                <select
+                  value={settings.model}
+                  onChange={(e) => onUpdate("model", e.target.value)}
+                  className="w-full bg-transparent border-b border-[color:var(--color-border)] px-0 h-8 text-sm focus:outline-none focus:border-[color:var(--color-accent)]"
+                >
+                  {AVAILABLE_MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                {activeModel && (
+                  <p className="text-xs text-[color:var(--color-fg-muted)] mt-2 leading-relaxed">
+                    {activeModel.description}
+                  </p>
+                )}
+              </Section>
+              <Section label="claude cli path">
+                <ClaudeCliPathInput
+                  value={settings.claudeCliPath}
+                  onSave={(p) => onUpdate("claudeCliPath", p)}
+                />
+                <p className="text-xs text-[color:var(--color-fg-dim)] mt-2 leading-relaxed">
+                  Leave blank to auto-detect. Set only if Braindump can't find
+                  your CLI. Run <span className="font-mono">which claude</span>{" "}
+                  in a terminal to get the path.
                 </p>
-              )}
-            </Section>
+              </Section>
+            </>
           )}
 
           <Section label="writing font">
@@ -177,6 +201,22 @@ export function SettingsPopover({
                 <Plus size={14} />
               </button>
             </div>
+          </Section>
+
+          <Section label="screenshot">
+            <button
+              onClick={() => {
+                onOpenScreenshot();
+                setOpen(false);
+              }}
+              className="label label-row text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-accent)] transition-colors"
+            >
+              <Camera size={13} />
+              <span>open studio</span>
+            </button>
+            <p className="text-xs text-[color:var(--color-fg-dim)] mt-2 leading-relaxed">
+              Capture a matted, shareable snapshot of Braindump.
+            </p>
           </Section>
 
           <Section label="updates" last>
@@ -290,6 +330,41 @@ function UpdatesBlock({ updater }: { updater: UseUpdater }) {
         )}
       </div>
     </div>
+  );
+}
+
+function ClaudeCliPathInput({
+  value,
+  onSave,
+}: {
+  value: string | null;
+  onSave: (path: string | null) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+
+  useEffect(() => {
+    setDraft(value ?? "");
+  }, [value]);
+
+  function commit() {
+    const trimmed = draft.trim();
+    onSave(trimmed || null);
+  }
+
+  return (
+    <input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      placeholder="auto-detect"
+      spellCheck={false}
+      className="w-full bg-transparent border-b border-[color:var(--color-border)] px-0 h-8 text-xs font-mono focus:outline-none focus:border-[color:var(--color-accent)] placeholder:text-[color:var(--color-fg-dim)]"
+    />
   );
 }
 

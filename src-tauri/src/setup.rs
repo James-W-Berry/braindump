@@ -9,6 +9,13 @@ use tokio::process::Command;
 
 use crate::agent::{claude_version, locate_claude, LOCAL_MODEL, OLLAMA_BASE_URL};
 
+#[derive(Debug, Serialize)]
+pub struct ClaudeStatus {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub resolved_path: Option<String>,
+}
+
 const OLLAMA_MACOS_URL: &str = "https://ollama.com/download/Ollama-darwin.zip";
 
 // Pin a known-good SHA256 to detect upstream changes. Leave empty to skip the
@@ -35,22 +42,23 @@ fn emit(app: &AppHandle, payload: ProgressPayload) {
     let _ = app.emit(PROGRESS_EVENT, payload);
 }
 
-#[derive(Debug, Serialize)]
-pub struct ClaudeStatus {
-    pub installed: bool,
-    pub version: Option<String>,
-}
-
 #[tauri::command]
-pub async fn check_claude() -> ClaudeStatus {
-    match locate_claude().await {
+pub async fn check_claude(claude_path: Option<String>) -> ClaudeStatus {
+    let override_path = claude_path
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+
+    match locate_claude(override_path).await {
         Some(path) => ClaudeStatus {
             installed: true,
             version: claude_version(&path).await,
+            resolved_path: Some(path.display().to_string()),
         },
         None => ClaudeStatus {
             installed: false,
             version: None,
+            resolved_path: None,
         },
     }
 }

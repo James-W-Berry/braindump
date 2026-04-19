@@ -30,6 +30,7 @@ export async function processCapture(args: {
   rawText: string;
   model: string;
   provider: "claude" | "ollama";
+  claudePath?: string | null;
 }): Promise<AgentResult> {
   return await invoke<AgentResult>("process_capture", {
     projectName: args.projectName,
@@ -38,5 +39,6 @@ export async function processCapture(args: {
     rawText: args.rawText,
     model: args.model,
     provider: args.provider,
+    claudePath: args.claudePath?.trim() ? args.claudePath.trim() : null,
   });
 }
