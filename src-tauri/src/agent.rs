@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+
+pub const LOCAL_MODEL: &str = "qwen2.5:7b";
+pub const OLLAMA_BASE_URL: &str = "http://localhost:11434";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExistingItem {
@@ -88,6 +92,7 @@ pub async fn process_capture(
     existing_items: Vec<ExistingItem>,
     raw_text: String,
     model: String,
+    provider: String,
 ) -> Result<AgentResult, String> {
     let user_prompt = build_user_prompt(
         &project_name,
@@ -96,10 +101,18 @@ pub async fn process_capture(
         &raw_text,
     );
 
+    match provider.as_str() {
+        "claude" => run_claude(&model, &user_prompt).await,
+        "ollama" => run_ollama(&model, &user_prompt).await,
+        other => Err(format!("unknown provider: {other}")),
+    }
+}
+
+async fn run_claude(model: &str, user_prompt: &str) -> Result<AgentResult, String> {
     let mut child = Command::new("claude")
         .arg("-p")
         .arg("--model")
-        .arg(&model)
+        .arg(model)
         .arg("--output-format")
         .arg("json")
         .arg("--append-system-prompt")
@@ -146,6 +159,79 @@ pub async fn process_capture(
     })?;
 
     Ok(parsed)
+}
+
+async fn run_ollama(model: &str, user_prompt: &str) -> Result<AgentResult, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("failed to build http client: {e}"))?;
+
+    let body = serde_json::json!({
+        "model": model,
+        "stream": false,
+        "messages": [
+            { "role": "system", "content": SYSTEM_PROMPT },
+            { "role": "user", "content": user_prompt },
+        ],
+        "format": agent_result_schema(),
+        "options": { "temperature": 0.2 },
+    });
+
+    let url = format!("{OLLAMA_BASE_URL}/api/chat");
+    let resp = client.post(&url).json(&body).send().await.map_err(|e| {
+        format!(
+            "couldn't reach ollama at {OLLAMA_BASE_URL}: {e}. Is it running? Try re-running setup."
+        )
+    })?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("ollama returned {status}: {text}"));
+    }
+
+    let envelope: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("failed to parse ollama response: {e}"))?;
+
+    let content = envelope
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| format!("ollama response missing message.content: {envelope}"))?;
+
+    let cleaned = strip_code_fences(content);
+    serde_json::from_str(cleaned).map_err(|e| {
+        format!("failed to parse agent result JSON from ollama: {e}\ncontent: {content}")
+    })
+}
+
+fn agent_result_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "summary": { "type": "string" },
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": { "type": "string" },
+                        "body": { "type": ["string", "null"] },
+                        "category": { "type": "string", "enum": ["bug", "idea", "feedback", "task", "question", "note"] },
+                        "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"] },
+                        "topic": { "type": "string", "minLength": 1 },
+                        "tags": { "type": "array", "items": { "type": "string" } },
+                        "related_item_ids": { "type": "array", "items": { "type": "integer" } }
+                    },
+                    "required": ["title", "category", "priority", "topic", "tags", "related_item_ids"]
+                }
+            }
+        },
+        "required": ["items"]
+    })
 }
 
 fn strip_code_fences(s: &str) -> &str {

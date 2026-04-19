@@ -5,6 +5,7 @@ import {
   FONT_LABELS,
   FONT_SIZES,
   AVAILABLE_MODELS,
+  LOCAL_MODEL_LABEL,
   type Settings,
 } from "@/lib/settings";
 import type { UseUpdater } from "@/lib/updater";
@@ -63,24 +64,48 @@ export function SettingsPopover({
             </div>
           </Section>
 
-          <Section label="model">
-            <select
-              value={settings.model}
-              onChange={(e) => onUpdate("model", e.target.value)}
-              className="w-full bg-transparent border-b border-[color:var(--color-border)] px-0 h-8 text-sm focus:outline-none focus:border-[color:var(--color-accent)]"
-            >
-              {AVAILABLE_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            {activeModel && (
-              <p className="text-xs text-[color:var(--color-fg-muted)] mt-2 leading-relaxed">
-                {activeModel.description}
-              </p>
-            )}
+          <Section label="provider">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm text-[color:var(--color-fg)]">
+                {settings.provider === "ollama" ? "Local · Ollama" : "Cloud · Claude"}
+              </span>
+              <button
+                onClick={() => {
+                  onUpdate("provider", null);
+                  setOpen(false);
+                }}
+                className="label text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-accent)] transition-colors"
+              >
+                switch
+              </button>
+            </div>
+            <p className="text-xs text-[color:var(--color-fg-muted)] mt-2 leading-relaxed">
+              {settings.provider === "ollama"
+                ? `Runs ${LOCAL_MODEL_LABEL} locally. Nothing leaves your device.`
+                : "Sent to Anthropic's API for processing."}
+            </p>
           </Section>
+
+          {settings.provider === "claude" && (
+            <Section label="claude model">
+              <select
+                value={settings.model}
+                onChange={(e) => onUpdate("model", e.target.value)}
+                className="w-full bg-transparent border-b border-[color:var(--color-border)] px-0 h-8 text-sm focus:outline-none focus:border-[color:var(--color-accent)]"
+              >
+                {AVAILABLE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              {activeModel && (
+                <p className="text-xs text-[color:var(--color-fg-muted)] mt-2 leading-relaxed">
+                  {activeModel.description}
+                </p>
+              )}
+            </Section>
+          )}
 
           <Section label="writing font">
             <div className="space-y-0.5">

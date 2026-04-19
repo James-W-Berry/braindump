@@ -1,15 +1,20 @@
-<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2aa3c2"/>
-      <stop offset="1" stop-color="#1a7a95"/>
-    </linearGradient>
+    <clipPath id="plate-clip">
+      <rect x="102" y="102" width="820" height="820" rx="180" ry="180"/>
+    </clipPath>
   </defs>
-  <rect x="100" y="100" width="824" height="824" rx="180" ry="180" fill="url(#bg)"/>
-  <path d="M 706.9 624.5 A 225 225 0 1 0 624.5 706.9"
-        fill="none"
-        stroke="#ebe6d8"
-        stroke-width="62"
-        stroke-linecap="round"/>
-  <circle cx="614.5" cy="614.5" r="34" fill="#c53929"/>
+
+  <!-- Gold-leaf plate. -->
+  <rect x="102" y="102" width="820" height="820" rx="180" ry="180" fill="#c49935"/>
+
+  <!-- Moebius sun/moon: a single pale celestial mark floating in the upper-left
+       of the gold field, diagonally opposed to the teal bands. -->
+  <circle cx="350" cy="340" r="110" fill="#e6e2d8"/>
+
+  <!-- Two diagonal teal bands in the bottom-right quadrant. -->
+  <g clip-path="url(#plate-clip)" stroke="#1f8ba8" stroke-width="72" fill="none">
+    <line x1="480" y1="960" x2="1040" y2="400"/>
+    <line x1="640" y1="960" x2="1040" y2="560"/>
+  </g>
 </svg>

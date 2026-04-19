@@ -36,6 +36,11 @@ export const AVAILABLE_MODELS: ModelOption[] = [
 
 export const DEFAULT_MODEL_ID = "claude-sonnet-4-6";
 
+export type Provider = "claude" | "ollama";
+
+export const LOCAL_MODEL_ID = "qwen2.5:7b";
+export const LOCAL_MODEL_LABEL = "Qwen 2.5 7B";
+
 export type PersistedView = "capture" | "items";
 
 export interface Settings {
@@ -45,6 +50,8 @@ export interface Settings {
   groupBy: GroupBy;
   hideDone: boolean;
   model: string;
+  localModel: string;
+  provider: Provider | null;
   activeProjectId: number | null;
   view: PersistedView;
 }
@@ -56,6 +63,8 @@ const DEFAULTS: Settings = {
   groupBy: "priority",
   hideDone: false,
   model: DEFAULT_MODEL_ID,
+  localModel: LOCAL_MODEL_ID,
+  provider: null,
   activeProjectId: null,
   view: "capture",
 };

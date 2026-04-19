@@ -29,6 +29,7 @@ export async function processCapture(args: {
   existingItems: ExistingItemContext[];
   rawText: string;
   model: string;
+  provider: "claude" | "ollama";
 }): Promise<AgentResult> {
   return await invoke<AgentResult>("process_capture", {
     projectName: args.projectName,
@@ -36,5 +37,6 @@ export async function processCapture(args: {
     existingItems: args.existingItems,
     rawText: args.rawText,
     model: args.model,
+    provider: args.provider,
   });
 }

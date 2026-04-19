@@ -1,4 +1,5 @@
 mod agent;
+mod setup;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -41,6 +42,13 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             agent::process_capture,
+            setup::check_claude,
+            setup::check_ollama,
+            setup::install_ollama,
+            setup::launch_ollama,
+            setup::pull_ollama_model,
+            setup::verify_ollama_setup,
+            setup::open_external_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

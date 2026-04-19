@@ -3,8 +3,6 @@ import {
   Plus,
   Send,
   X,
-  Eye,
-  EyeOff,
   Search,
   Trash2,
   Undo2,
@@ -16,7 +14,8 @@ import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { SettingsPopover } from "@/components/SettingsPopover";
 import { ProcessingView } from "@/components/ProcessingView";
-import { EditableText, EditableSelect } from "@/components/Editable";
+import { SetupWizard } from "@/components/SetupWizard";
+import { EditableText, EditableSelect, EditableCombo } from "@/components/Editable";
 import {
   listProjects,
   createProject,
@@ -98,6 +97,15 @@ export default function App() {
     [projects, activeProjectId],
   );
 
+  const existingTopics = useMemo(() => {
+    const s = new Set<string>();
+    for (const i of items) {
+      const t = i.topic?.trim();
+      if (t) s.add(t);
+    }
+    return Array.from(s).sort();
+  }, [items]);
+
   async function handleProcess() {
     if (!activeProject || !draft.trim()) return;
     setError(null);
@@ -111,13 +119,19 @@ export default function App() {
         topic: i.topic,
         status: i.status,
       }));
+      const activeModel =
+        settings.provider === "ollama" ? settings.localModel : settings.model;
       const result = await processCapture({
         projectName: activeProject.name,
         projectDescription: activeProject.description,
         existingItems: existing,
         rawText: draft,
-        model: settings.model,
+        model: activeModel,
+        provider: settings.provider ?? "claude",
       });
+      // Only honor related_item_ids that reference items we actually sent to
+      // the agent — local models (and occasionally Claude) can invent IDs.
+      const knownIds = new Set(existing.map((i) => i.id));
       for (const it of result.items) {
         const newId = await insertItem(activeProject.id, capture.id, {
           title: it.title,
@@ -128,7 +142,9 @@ export default function App() {
           tags: it.tags ?? [],
         });
         for (const relId of it.related_item_ids ?? []) {
-          await linkItems(newId, relId);
+          if (knownIds.has(relId)) {
+            await linkItems(newId, relId);
+          }
         }
       }
       await markCaptureProcessed(capture.id, "processed");
@@ -231,6 +247,10 @@ export default function App() {
     setItems(await listItems(activeProjectId));
   }
 
+  if (settings.provider == null) {
+    return <SetupWizard onComplete={(p) => update("provider", p)} />;
+  }
+
   return (
     <div className="flex flex-col h-full">
       <Header
@@ -271,6 +291,7 @@ export default function App() {
         ) : (
           <ItemsView
             items={trashView ? trashItems : items}
+            allTopics={existingTopics}
             lastResult={trashView ? null : lastResult}
             groupBy={settings.groupBy}
             hideDone={settings.hideDone}
@@ -531,6 +552,7 @@ type EditField = "title" | "body" | "topic" | "category" | "priority" | "tags";
 
 function ItemsView({
   items,
+  allTopics,
   lastResult,
   groupBy,
   hideDone,
@@ -546,6 +568,7 @@ function ItemsView({
   onPermanentDelete,
 }: {
   items: Item[];
+  allTopics: string[];
   lastResult: AgentResult | null;
   groupBy: GroupBy;
   hideDone: boolean;
@@ -595,7 +618,9 @@ function ItemsView({
           <div className="label text-[color:var(--color-danger)]">recently deleted</div>
         ) : (
           <div className="flex items-center gap-3">
-            <span className="label text-[color:var(--color-fg-muted)]">group</span>
+            <span className="text-xs lowercase text-[color:var(--color-fg-dim)] italic">
+              group by
+            </span>
             <nav className="flex items-center gap-3">
               {(["priority", "topic", "category"] as GroupBy[]).map((g, idx) => (
                 <div key={g} className="flex items-center gap-3">
@@ -641,14 +666,21 @@ function ItemsView({
             )}
           </label>
         </div>
-        {!trashView && (
+        {!trashView && doneCount > 0 && (
           <button
             onClick={onToggleHideDone}
+            title={hideDone ? "click to show completed items" : "click to hide completed items"}
             className="label label-row text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)] transition-colors"
           >
-            {hideDone ? <EyeOff size={13} /> : <Eye size={13} />}
+            <span
+              className={`inline-block w-2.5 h-2.5 border transition-colors ${
+                hideDone
+                  ? "border-[color:var(--color-border)]"
+                  : "bg-[color:var(--color-accent)] border-[color:var(--color-accent)]"
+              }`}
+            />
             <span>
-              {hideDone ? `hiding ${doneCount}` : `showing ${doneCount} done`}
+              show done · {doneCount.toString().padStart(2, "0")}
             </span>
           </button>
         )}
@@ -691,6 +723,8 @@ function ItemsView({
           ) : (
             <Tracklist
               groups={groups}
+              groupBy={trashView ? null : groupBy}
+              allTopics={allTopics}
               trashView={trashView}
               onToggleDone={onToggleDone}
               onMoveItem={onMoveItem}
@@ -709,6 +743,8 @@ function ItemsView({
 
 function Tracklist({
   groups,
+  groupBy,
+  allTopics,
   trashView,
   onToggleDone,
   onMoveItem,
@@ -719,6 +755,8 @@ function Tracklist({
   totalVisible,
 }: {
   groups: { key: string; label: string; items: Item[] }[];
+  groupBy: GroupBy | null;
+  allTopics: string[];
   trashView: boolean;
   onToggleDone: (id: number, current: Item["status"]) => void;
   onMoveItem: (id: number, direction: "up" | "down") => void;
@@ -731,38 +769,45 @@ function Tracklist({
   let runningIndex = 0;
   return (
     <div>
-      {groups.map((g) => (
-        <section key={g.key} className="mb-12">
-          <header className="flex items-baseline gap-4 mb-2 pb-2 border-b border-transparent">
-            <h3 className="label text-[color:var(--color-fg)]">{g.label}</h3>
-            <div className="flex-1 h-px bg-[color:var(--color-border)]" />
-            <span className="label text-[color:var(--color-fg-muted)] tabular-nums">
-              {g.items.length.toString().padStart(2, "0")}
-            </span>
-          </header>
-          <ul>
-            {g.items.map((item, idx) => {
-              runningIndex += 1;
-              return (
-                <ItemRow
-                  key={item.id}
-                  item={item}
-                  index={runningIndex}
-                  trashView={trashView}
-                  isFirstInGroup={idx === 0}
-                  isLastInGroup={idx === g.items.length - 1}
-                  onMoveItem={onMoveItem}
-                  onToggleDone={onToggleDone}
-                  onEditItem={onEditItem}
-                  onDeleteItem={onDeleteItem}
-                  onRestoreItem={onRestoreItem}
-                  onPermanentDelete={onPermanentDelete}
-                />
-              );
-            })}
-          </ul>
-        </section>
-      ))}
+      {groups.map((g) => {
+        const labelColor = groupBy
+          ? groupHeaderColor(groupBy, g.key)
+          : "text-[color:var(--color-fg)]";
+        return (
+          <section key={g.key} className="mb-14">
+            <header className="flex items-baseline gap-4 mb-4">
+              <h3 className={`label ${labelColor}`}>{g.label}</h3>
+              <div className="flex-1 h-px bg-[color:var(--color-border)]" />
+              <span className="label text-[color:var(--color-fg-muted)] tabular-nums">
+                {g.items.length.toString().padStart(2, "0")}
+              </span>
+            </header>
+            <ul>
+              {g.items.map((item, idx) => {
+                runningIndex += 1;
+                return (
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    index={runningIndex}
+                    trashView={trashView}
+                    groupBy={groupBy}
+                    isFirstInGroup={idx === 0}
+                    isLastInGroup={idx === g.items.length - 1}
+                    allTopics={allTopics}
+                    onMoveItem={onMoveItem}
+                    onToggleDone={onToggleDone}
+                    onEditItem={onEditItem}
+                    onDeleteItem={onDeleteItem}
+                    onRestoreItem={onRestoreItem}
+                    onPermanentDelete={onPermanentDelete}
+                  />
+                );
+              })}
+            </ul>
+          </section>
+        );
+      })}
       <div className="flex items-baseline gap-4 pt-2">
         <div className="flex-1 h-px bg-[color:var(--color-border)]" />
         <span className="label text-[color:var(--color-accent)] tabular-nums">
@@ -783,12 +828,40 @@ const CATEGORY_OPTIONS: Item["category"][] = [
 ];
 const PRIORITY_OPTIONS: Item["priority"][] = ["urgent", "high", "medium", "low"];
 
+const CATEGORY_COLOR: Record<Item["category"], string> = {
+  bug: "text-[color:var(--color-danger)]",
+  idea: "text-[color:var(--color-accent)]",
+  feedback: "text-amber-700 dark:text-amber-400",
+  task: "text-[color:var(--color-success)]",
+  question: "text-purple-700 dark:text-purple-400",
+  note: "text-[color:var(--color-fg-muted)]",
+};
+
+const PRIORITY_COLOR: Record<Item["priority"], string> = {
+  urgent: "text-[color:var(--color-danger)]",
+  high: "text-[color:var(--color-fg)]",
+  medium: "text-[color:var(--color-fg-muted)]",
+  low: "text-[color:var(--color-fg-muted)]",
+};
+
+function groupHeaderColor(mode: GroupBy, key: string): string {
+  if (mode === "priority" && key in PRIORITY_COLOR) {
+    return PRIORITY_COLOR[key as Item["priority"]];
+  }
+  if (mode === "category" && key in CATEGORY_COLOR) {
+    return CATEGORY_COLOR[key as Item["category"]];
+  }
+  return "text-[color:var(--color-fg)]";
+}
+
 function ItemRow({
   item,
   index,
   trashView,
+  groupBy,
   isFirstInGroup,
   isLastInGroup,
+  allTopics,
   onMoveItem,
   onToggleDone,
   onEditItem,
@@ -799,8 +872,10 @@ function ItemRow({
   item: Item;
   index: number;
   trashView: boolean;
+  groupBy: GroupBy | null;
   isFirstInGroup: boolean;
   isLastInGroup: boolean;
+  allTopics: string[];
   onMoveItem: (id: number, direction: "up" | "down") => void;
   onToggleDone: (id: number, current: Item["status"]) => void;
   onEditItem: (id: number, field: EditField, value: string | null) => void;
@@ -810,32 +885,35 @@ function ItemRow({
 }) {
   const done = item.status === "done";
   const [, setEditing] = useState(false);
+  const [confirmingPermDelete, setConfirmingPermDelete] = useState(false);
   const tags = item.tags ? item.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
 
-  const categoryColor: Record<Item["category"], string> = {
-    bug: "text-[color:var(--color-danger)]",
-    idea: "text-[color:var(--color-accent)]",
-    feedback: "text-amber-700 dark:text-amber-400",
-    task: "text-[color:var(--color-success)]",
-    question: "text-purple-700 dark:text-purple-400",
-    note: "text-[color:var(--color-fg-muted)]",
-  };
+  useEffect(() => {
+    if (!confirmingPermDelete) return;
+    const id = setTimeout(() => setConfirmingPermDelete(false), 3000);
+    return () => clearTimeout(id);
+  }, [confirmingPermDelete]);
 
-  const priorityColor: Record<Item["priority"], string> = {
-    urgent: "text-[color:var(--color-danger)]",
-    high: "text-[color:var(--color-fg)]",
-    medium: "text-[color:var(--color-fg-muted)]",
-    low: "text-[color:var(--color-fg-muted)]",
-  };
+  const showCategory = groupBy !== "category";
+  const showTopic = groupBy !== "topic";
+  const showPriority = groupBy !== "priority";
+  const urgentAccent =
+    item.priority === "urgent" && groupBy !== "priority" && !done && !trashView;
 
   return (
     <li
-      className={`group relative grid grid-cols-[40px_1fr_auto] gap-4 py-4 border-b border-[color:var(--color-border)] transition-opacity ${
+      className={`group relative grid grid-cols-[40px_1fr_auto] gap-4 py-3.5 transition-opacity ${
         done ? "opacity-40" : ""
       } ${trashView ? "opacity-70" : ""}`}
     >
       <div className="flex items-start justify-end pt-0.5 select-none relative">
-        <span className="font-mono text-xs text-[color:var(--color-fg-dim)] tabular-nums tracking-wider group-hover:opacity-0 transition-opacity">
+        <span
+          className={`font-mono text-xs tabular-nums tracking-wider group-hover:opacity-0 transition-opacity ${
+            urgentAccent
+              ? "text-[color:var(--color-danger)]"
+              : "text-[color:var(--color-fg-dim)]"
+          }`}
+        >
           {toRoman(index)}
         </span>
         {!trashView && (
@@ -873,31 +951,44 @@ function ItemRow({
           }`}
         />
         <div className="flex items-center gap-2.5 mt-1.5 label text-[color:var(--color-fg-muted)] flex-wrap">
-          <EditableSelect
-            value={item.category}
-            options={CATEGORY_OPTIONS}
-            onSave={(v) => onEditItem(item.id, "category", v)}
-            onEditingChange={setEditing}
-            className={categoryColor[item.category]}
-            renderOption={(c) => <span className={categoryColor[c]}>{c}</span>}
-          />
-          <Dot />
-          <EditableText
-            value={item.topic ?? ""}
-            onSave={(v) => onEditItem(item.id, "topic", v.trim() ? v.trim() : null)}
-            placeholder="+ topic"
-            onEditingChange={setEditing}
-          />
-          <Dot />
-          <EditableSelect
-            value={item.priority}
-            options={PRIORITY_OPTIONS}
-            onSave={(v) => onEditItem(item.id, "priority", v)}
-            onEditingChange={setEditing}
-            className={priorityColor[item.priority]}
-            renderOption={(p) => <span className={priorityColor[p]}>{p}</span>}
-          />
-          <Dot />
+          {showCategory && (
+            <>
+              <EditableSelect
+                value={item.category}
+                options={CATEGORY_OPTIONS}
+                onSave={(v) => onEditItem(item.id, "category", v)}
+                onEditingChange={setEditing}
+                className={CATEGORY_COLOR[item.category]}
+                renderOption={(c) => <span className={CATEGORY_COLOR[c]}>{c}</span>}
+              />
+              <Dot />
+            </>
+          )}
+          {showTopic && (
+            <>
+              <EditableCombo
+                value={item.topic ?? ""}
+                options={allTopics}
+                onSave={(v) => onEditItem(item.id, "topic", v)}
+                placeholder="+ topic"
+                onEditingChange={setEditing}
+              />
+              <Dot />
+            </>
+          )}
+          {showPriority && (
+            <>
+              <EditableSelect
+                value={item.priority}
+                options={PRIORITY_OPTIONS}
+                onSave={(v) => onEditItem(item.id, "priority", v)}
+                onEditingChange={setEditing}
+                className={PRIORITY_COLOR[item.priority]}
+                renderOption={(p) => <span className={PRIORITY_COLOR[p]}>{p}</span>}
+              />
+              <Dot />
+            </>
+          )}
           <EditableText
             value={tags.length ? tags.map((t) => `#${t}`).join(" ") : ""}
             onSave={(v) => {
@@ -939,12 +1030,23 @@ function ItemRow({
             </button>
             <button
               onClick={() => {
-                if (confirm(`Permanently delete "${item.title}"? This cannot be undone.`))
+                if (confirmingPermDelete) {
                   onPermanentDelete(item.id);
+                } else {
+                  setConfirmingPermDelete(true);
+                }
               }}
               onMouseDown={(e) => e.stopPropagation()}
-              title="delete permanently"
-              className="text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-danger)] transition-colors"
+              title={
+                confirmingPermDelete
+                  ? "click again to confirm · auto-cancels in 3s"
+                  : "delete permanently"
+              }
+              className={
+                confirmingPermDelete
+                  ? "text-[color:var(--color-danger)]"
+                  : "text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-danger)] transition-colors"
+              }
             >
               <Trash2 size={12} />
             </button>
@@ -962,11 +1064,9 @@ function ItemRow({
               }`}
             />
             <button
-              onClick={() => {
-                if (confirm(`Delete "${item.title}"?`)) onDeleteItem(item.id);
-              }}
+              onClick={() => onDeleteItem(item.id)}
               onMouseDown={(e) => e.stopPropagation()}
-              title="delete"
+              title="move to trash"
               className="opacity-0 group-hover:opacity-100 text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-danger)] transition-opacity"
             >
               <Trash2 size={12} />

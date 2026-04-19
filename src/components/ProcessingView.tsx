@@ -32,7 +32,9 @@ export function ProcessingView({ projectName }: { projectName: string }) {
           <Logo size={28} className="text-[color:var(--color-accent)] animate-pulse" />
           <div>
             <div className="label text-[color:var(--color-fg-muted)]">processing</div>
-            <div className="text-base font-semibold mt-1">{projectName}</div>
+            <div className="text-base font-semibold mt-1">
+              {projectName} brain dump
+            </div>
           </div>
         </div>
 

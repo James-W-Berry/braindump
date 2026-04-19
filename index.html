@@ -65,9 +65,17 @@
   <body>
     <div id="splash" aria-hidden="true">
       <svg width="52" height="52" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-        <path d="M 754.5 652 A 280 280 0 1 0 652 754.5"
-              fill="none" stroke="currentColor" stroke-width="120" stroke-linecap="round"/>
-        <circle cx="639" cy="639" r="64" fill="#c53929"/>
+        <defs>
+          <clipPath id="braindump-plate-clip-splash">
+            <rect x="102" y="102" width="820" height="820" rx="180" ry="180"/>
+          </clipPath>
+        </defs>
+        <rect x="102" y="102" width="820" height="820" rx="180" ry="180" fill="#c49935"/>
+        <circle cx="350" cy="340" r="110" fill="#e6e2d8"/>
+        <g clip-path="url(#braindump-plate-clip-splash)" stroke="currentColor" stroke-width="72" fill="none">
+          <line x1="480" y1="960" x2="1040" y2="400"/>
+          <line x1="640" y1="960" x2="1040" y2="560"/>
+        </g>
       </svg>
       <div class="wordmark">BRAINDUMP</div>
     </div>
