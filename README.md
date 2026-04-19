@@ -19,13 +19,14 @@ In the middle of a demo, a 1:1, a drive, or the shower, ideas arrive. Pausing to
 ### What you get
 
 - **Zero-friction capture** — pick a project, start typing. A blank page and your choice of font/size.
+- **Immersive writing mode** — an optional animated backdrop behind the textarea (drifting color bands, a perspective grid that scrolls toward you, seamless sine waves, and a distant sun for the richer themes) plus an in-footer YouTube mini-player with three presentation modes: a hover-to-reveal thumbnail, a floating 240×135 mini-window, or the video's thumbnail blurred into the background. Remembers your last 20 links (titles resolved via YouTube's public oEmbed) and the exact playback position per video, so switching streams or closing mid-session picks up where you left off. Both layers pause on window blur and honor `prefers-reduced-motion`.
 - **Agent processing** — dumps get split into discrete items, corrected, expanded, categorized (bug · task · idea · feedback · question · note), prioritized (urgent → low), topic-clustered (`auth`, `onboarding ux`, `deploy pipeline`…), and cross-referenced against items you already captured.
-- **Two processing paths — you choose** — cloud (Claude via the `claude` CLI) or fully local (Ollama + Qwen 2.5 7B). First launch presents a wizard that detects what you have installed, downloads + sets up the local runtime end-to-end if you pick that path, and remembers your choice. Switch anytime from settings.
+- **Two processing paths — you choose** — cloud (Claude via the `claude` CLI) or fully local (Ollama + your choice of tiered models from Qwen 2.5 7B through 72B). First launch presents a wizard that detects what you have installed, downloads + sets up the local runtime end-to-end if you pick that path, and remembers your choice. Switch anytime from settings.
 - **Multiple views** — group items by priority, topic, or category. Each view hides the grouping dimension from rows (so "bugs" inside a `bugs` group don't repeat), colors group headers by category/priority, and flags urgent items in non-priority views.
 - **Inline editing** — click any field to edit. Titles, bodies, categories, priorities, tags. Topic uses an autocomplete combobox against existing project topics, normalized to lowercase+trim so "Auth" and "auth" collapse into one canonical cluster.
 - **Soft delete + trash** — single-click delete moves items to a recoverable trash view; a 3-second inline confirm gate guards permanent deletion.
-- **Local-first data, always** — every capture and item lives in a SQLite database on your machine. No telemetry. If you pick the local processing path, no captures *ever* leave your device. If you pick Claude, only the text of a capture is sent — and only at the moment you hit Process.
-- **Themed to your mood** — light (warm paper) and dark (sumi-ink) themes. Writing font and size are configurable.
+- **Local-first data, always** — every capture and item lives in a SQLite database on your machine. No telemetry. If you pick the local processing path, no captures *ever* leave your device. If you pick Claude, only the text of a capture is sent — and only at the moment you hit Process. The optional music feature, if you enable it, talks to YouTube directly via the standard IFrame + oEmbed APIs; no captures are sent there.
+- **Themed to your mood** — four palettes: `light` (warm paper), `dark` (sumi-ink), `gilt` (gold-leaf plate + cream sun + teal bands, a literal take on the logo), and `vapor` (nostalgia vaporwave — night-sky indigo + magenta + teal). Writing font and size are configurable.
 - **Auto-updates** — Braindump checks for a newer version on each launch. When one's available, you'll see a dot on the settings gear; click **Install update** in Settings and it downloads, verifies, replaces itself, and restarts. No manual re-installs after the first one.
 
 ### Processing providers
@@ -147,15 +148,20 @@ braindump/
 │   ├── components/
 │   │   ├── Logo.tsx             # inline SVG of the brand mark
 │   │   ├── Editable.tsx         # click-to-edit text + select + autocomplete-combo primitives
+│   │   ├── CaptureAmbient.tsx   # theme-tinted animated backdrop (bands + grid + sine waves + sun)
+│   │   ├── YouTubePlayer.tsx    # persistent YT IFrame player with 3 presentation modes + oEmbed title helper
 │   │   ├── SettingsPopover.tsx  # theme/provider/model/font settings
 │   │   ├── SetupWizard.tsx      # first-run provider picker + local install flow
+│   │   ├── ScreenshotStudio.tsx # matted snapshot export
 │   │   └── ProcessingView.tsx   # agent processing screen
 │   ├── lib/
 │   │   ├── db.ts                # SQLite wrappers
 │   │   ├── agent.ts             # invokes the Rust process_capture command
 │   │   ├── setup.ts             # wraps Tauri setup commands + progress event listener
+│   │   ├── screenshot.ts        # DOM → PNG capture (with form-state mirroring)
+│   │   ├── updater.ts           # auto-update status state machine
 │   │   └── settings.ts          # localStorage-persisted settings + useSettings hook
-│   └── index.css                # theme tokens + global styles
+│   └── index.css                # theme tokens + ambient/capture animations + global styles
 └── src-tauri/
     ├── src/
     │   ├── lib.rs               # Tauri setup + plugin/command registration + migrations
@@ -205,7 +211,6 @@ This prints both the public key and the path to the private key. Then:
 
 - Linux / Windows auto-install flows in the local-provider wizard
 - SHA256 pinning on the Ollama download (currently skipped — see the `OLLAMA_MACOS_SHA256` constant in `setup.rs`)
-- Local-provider model choice (currently fixed to Qwen 2.5 7B; offer 7B/8B/12B tiers with disk/RAM footprints shown)
 - Cancellation for the model pull during setup
 - Global hotkey to pop a capture window from anywhere
 - Export items to Linear, GitHub, Notion, or a Markdown file
