@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Quick Capture</title>
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem("braindump.settings");
+          var theme = "light";
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && (parsed.theme === "light" || parsed.theme === "dark")) {
+              theme = parsed.theme;
+            }
+          }
+          document.documentElement.dataset.theme = theme;
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      /* The window itself is transparent (tauri.conf.json). index.css paints
+         body with --color-background for the main app, so we override that
+         here — the quick-capture surface lives entirely inside #root, which
+         carries the rounded shape below. */
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: transparent !important;
+        overflow: hidden;
+      }
+      #root {
+        height: 100%;
+        border-radius: 10px;
+        overflow: hidden;
+        background: #0b0d0e;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+      }
+      html[data-theme="light"] #root { background: #e6e2d8; }
+    </style>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/quick-capture-main.tsx"></script>
+  </body>
+</html>

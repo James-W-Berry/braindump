@@ -15,6 +15,13 @@ import {
   PictureInPicture2,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  enable as enableAutostart,
+  disable as disableAutostart,
+  isEnabled as isAutostartEnabled,
+} from "@tauri-apps/plugin-autostart";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { SettingsPopover } from "@/components/SettingsPopover";
@@ -159,6 +166,50 @@ export default function App() {
       cancelled = true;
     };
   }, [activeProjectId, flushDraftSave]);
+
+  // The quick-capture window appends to the same draft row. When that
+  // happens while the main window is live on that project, pull in the fresh
+  // text so the textarea reflects the merged result.
+  useEffect(() => {
+    const un = listen<{ projectId: number }>("draft-updated", async (e) => {
+      if (activeProjectId == null) return;
+      if (e.payload?.projectId !== activeProjectId) return;
+      // Flush anything queued locally first so we don't race our own save
+      // against the incoming merged text.
+      await flushDraftSave();
+      const text = await getDraft(activeProjectId);
+      setDraft(text ?? "");
+    });
+    return () => {
+      un.then((fn) => fn()).catch(() => {});
+    };
+  }, [activeProjectId, flushDraftSave]);
+
+  // Sync the autostart setting with the OS. Idempotent — reads the current
+  // state first so we don't churn the plist/registry on every launch.
+  useEffect(() => {
+    (async () => {
+      const currentlyEnabled = await isAutostartEnabled();
+      if (settings.autostart && !currentlyEnabled) {
+        await enableAutostart();
+      } else if (!settings.autostart && currentlyEnabled) {
+        await disableAutostart();
+      }
+    })().catch((e) => {
+      console.warn("failed to sync autostart:", e);
+    });
+  }, [settings.autostart]);
+
+  // Keep the Rust-side global shortcut in sync with the user's setting.
+  // Rust boots with its hardcoded default; this overrides it with the
+  // persisted value and re-registers whenever the user rebinds.
+  useEffect(() => {
+    const shortcut = settings.quickCaptureShortcut;
+    if (!shortcut) return;
+    invoke("set_quick_capture_shortcut", { shortcut }).catch((e) => {
+      console.warn("failed to register quick-capture shortcut:", e);
+    });
+  }, [settings.quickCaptureShortcut]);
 
   // Flush pending draft save if the window is about to close.
   useEffect(() => {

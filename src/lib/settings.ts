@@ -175,6 +175,19 @@ export interface Settings {
    * to NTS 1 live (whatever's on the schedule right now).
    */
   activeEpisode: OtakuEpisode | null;
+  /**
+   * Global shortcut that toggles the quick-capture window. Serialized in
+   * the format Tauri's shortcut parser accepts — modifiers joined with
+   * "+", then a KeyCode name (e.g. "Ctrl+Cmd+KeyB"). Modifier tokens:
+   * "Ctrl", "Alt", "Shift", "Cmd".
+   */
+  quickCaptureShortcut: string;
+  /**
+   * Launch Braindump at login so the global shortcut is live without the
+   * user having to open the app manually each session. When enabled the
+   * app auto-starts with `--hidden` and waits in the background.
+   */
+  autostart: boolean;
 }
 
 /**
@@ -197,6 +210,13 @@ export interface OtakuEpisode {
   mixcloudFeed: string;
 }
 
+export const IS_MAC =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+
+export const DEFAULT_QUICK_CAPTURE_SHORTCUT = IS_MAC
+  ? "Ctrl+Cmd+KeyB"
+  : "Ctrl+Alt+KeyB";
+
 const DEFAULTS: Settings = {
   theme: "light",
   font: "sans",
@@ -214,6 +234,8 @@ const DEFAULTS: Settings = {
   musicVolume: 0.5,
   musicMode: "floating",
   activeEpisode: null,
+  quickCaptureShortcut: DEFAULT_QUICK_CAPTURE_SHORTCUT,
+  autostart: false,
 };
 
 const STORAGE_KEY = "braindump.settings";

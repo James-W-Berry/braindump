@@ -10,8 +10,10 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "main",
         "title": "BRAINDUMP",
         "width": 1100,
         "height": 780,
@@ -22,6 +24,27 @@
         "hiddenTitle": true,
         "trafficLightPosition": { "x": 18, "y": 26 },
         "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15"
+      },
+      {
+        "label": "quick-capture",
+        "url": "quick-capture.html",
+        "title": "Quick Capture",
+        "width": 460,
+        "height": 280,
+        "resizable": true,
+        "minWidth": 360,
+        "minHeight": 200,
+        "visible": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "backgroundColor": "#00000000",
+        "acceptFirstMouse": true,
+        "visibleOnAllWorkspaces": true,
+        "focus": true,
+        "center": true
       }
     ],
     "security": {

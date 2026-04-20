@@ -7,6 +7,7 @@ import {
   Check,
   Camera,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   type FontFamily,
   FONT_LABELS,
@@ -14,6 +15,8 @@ import {
   AVAILABLE_MODELS,
   LOCAL_MODELS,
   findLocalModel,
+  IS_MAC,
+  DEFAULT_QUICK_CAPTURE_SHORTCUT,
   type Settings,
 } from "@/lib/settings";
 import type { UseUpdater } from "@/lib/updater";
@@ -231,6 +234,32 @@ export function SettingsPopover({
             </p>
           </Section>
 
+          <Section label="quick capture shortcut">
+            <ShortcutRecorder
+              value={settings.quickCaptureShortcut}
+              onCommit={(s) => onUpdate("quickCaptureShortcut", s)}
+            />
+            <p className="text-xs text-[color:var(--color-fg-dim)] mt-2 leading-relaxed">
+              Global hotkey that opens the quick capture window from anywhere.
+              Click to record a new combo — must include at least one modifier.
+            </p>
+            <label className="mt-4 flex items-center justify-between gap-3 cursor-pointer">
+              <span className="text-sm text-[color:var(--color-fg)]">
+                launch at login
+              </span>
+              <input
+                type="checkbox"
+                checked={settings.autostart}
+                onChange={(e) => onUpdate("autostart", e.target.checked)}
+                className="accent-[color:var(--color-accent)]"
+              />
+            </label>
+            <p className="text-xs text-[color:var(--color-fg-dim)] mt-2 leading-relaxed">
+              Starts Braindump quietly in the background when you log in so
+              the shortcut is ready without launching the app manually.
+            </p>
+          </Section>
+
           <Section label="updates" last>
             <UpdatesBlock updater={updater} />
           </Section>
@@ -383,6 +412,123 @@ function ClaudeCliPathInput({
       spellCheck={false}
       className="w-full bg-transparent border-b border-[color:var(--color-border)] px-0 h-8 text-xs font-mono focus:outline-none focus:border-[color:var(--color-accent)] placeholder:text-[color:var(--color-fg-dim)]"
     />
+  );
+}
+
+function prettyShortcut(serialized: string): string {
+  if (!serialized) return "—";
+  const sep = IS_MAC ? " " : " + ";
+  return serialized
+    .split("+")
+    .map((part) => {
+      if (part === "Ctrl") return IS_MAC ? "⌃" : "Ctrl";
+      if (part === "Alt") return IS_MAC ? "⌥" : "Alt";
+      if (part === "Shift") return IS_MAC ? "⇧" : "Shift";
+      if (part === "Cmd") return IS_MAC ? "⌘" : "Win";
+      if (part.startsWith("Key")) return part.slice(3);
+      if (part.startsWith("Digit")) return part.slice(5);
+      return part;
+    })
+    .join(sep);
+}
+
+// Turns a live keydown into the string Tauri's shortcut parser expects —
+// e.g. ⌃⌘B → "Ctrl+Cmd+KeyB". Returns null while the user is still holding
+// only modifiers (no finalized combo yet) or tried a bare key.
+function serializeKeyEvent(e: KeyboardEvent): string | null | "bare" {
+  if (["Control", "Alt", "Shift", "Meta", "OS"].includes(e.key)) return null;
+  const mods: string[] = [];
+  if (e.ctrlKey) mods.push("Ctrl");
+  if (e.altKey) mods.push("Alt");
+  if (e.shiftKey) mods.push("Shift");
+  if (e.metaKey) mods.push("Cmd");
+  if (mods.length === 0) return "bare";
+  return [...mods, e.code].join("+");
+}
+
+function ShortcutRecorder({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (serialized: string) => void;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!recording) return;
+    const handler = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        setRecording(false);
+        setError(null);
+        return;
+      }
+      const result = serializeKeyEvent(e);
+      if (result == null) return; // pure modifier keydown — keep waiting
+      if (result === "bare") {
+        setError("need at least one modifier (Ctrl / Alt / Shift / Cmd)");
+        return;
+      }
+      // Apply via Rust first so we don't persist a combo the OS refuses.
+      invoke("set_quick_capture_shortcut", { shortcut: result })
+        .then(() => {
+          onCommit(result);
+          setRecording(false);
+          setError(null);
+        })
+        .catch((err) => {
+          setError(String(err));
+        });
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [recording, onCommit]);
+
+  async function reset() {
+    try {
+      await invoke("set_quick_capture_shortcut", {
+        shortcut: DEFAULT_QUICK_CAPTURE_SHORTCUT,
+      });
+      onCommit(DEFAULT_QUICK_CAPTURE_SHORTCUT);
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => {
+            setRecording((r) => !r);
+            setError(null);
+          }}
+          className={`flex-1 text-left h-8 px-2 font-mono text-sm border transition-colors ${
+            recording
+              ? "border-[color:var(--color-accent)] text-[color:var(--color-accent)]"
+              : "border-[color:var(--color-border)] text-[color:var(--color-fg)] hover:border-[color:var(--color-fg)]/50"
+          }`}
+        >
+          {recording ? "press keys · esc to cancel" : prettyShortcut(value)}
+        </button>
+        <button
+          onClick={reset}
+          title="Reset to default"
+          className="label text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)] transition-colors"
+        >
+          reset
+        </button>
+      </div>
+      {error && (
+        <p className="text-xs text-[color:var(--color-danger)] leading-relaxed">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -37,4 +37,13 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        "quick-capture": path.resolve(__dirname, "quick-capture.html"),
+      },
+    },
+  },
 }));
