@@ -3,29 +3,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type Theme = "light" | "dark" | "vapor" | "gilt";
 
-/**
- * A YouTube video the user has played before. Tracked in a capped LRU
- * list so the URL input can double as an autocomplete showing the
- * user's own favorites / most-used streams.
- */
-export interface MusicRecent {
-  /** 11-character YouTube video ID — the unique key. */
-  id: string;
-  /** Original URL the user pasted (or derived from the ID). */
-  url: string;
-  /** Fetched title via oEmbed. Null when we couldn't resolve it. */
-  title: string | null;
-  /** When this entry last became the active video, ms since epoch. */
-  lastUsed: number;
-  /**
-   * Last known playback position in seconds. When the user returns to
-   * this video the player is told to seek here so sessions resume
-   * where they left off. Cleared to 0 on end-of-video.
-   */
-  lastPosition?: number;
-}
-
-export const MAX_MUSIC_RECENTS = 20;
 export type FontFamily = "sans" | "mono" | "serif" | "system";
 export type GroupBy = "priority" | "topic" | "category";
 
@@ -177,32 +154,47 @@ export interface Settings {
    * On by default; users on very low-end machines can disable.
    */
   ambientBackground: boolean;
-  /**
-   * YouTube URL to play as ambient music on the Capture view. Supports
-   * standard watch/short/embed/live URL forms and raw 11-char video IDs.
-   * Null when the user hasn't set one yet.
-   */
-  musicUrl: string | null;
-  /** Whether the music is currently playing. */
+  /** Whether the NTS stream (live or archive) is currently playing. */
   musicPlaying: boolean;
-  /** Music volume 0..1. */
+  /** Music volume 0..1. Only applies in live mode — the Mixcloud widget
+   * owns its own volume when an archive episode is active. */
   musicVolume: number;
   /**
-   * How the YouTube player presents itself on the Capture view:
-   *   • `thumbnail` — tiny video thumbnail in the footer; hover reveals
-   *     a small player popup for controls.
-   *   • `floating`  — a fixed 240×135 mini player pinned to the
-   *     bottom-right of the writing area.
-   *   • `background` — the video's thumbnail tiles behind the textarea
-   *     at low opacity, replacing the animated backdrop. Audio only.
+   * How the NTS player presents itself on the Capture view:
+   *   • `thumbnail` — tiny cover-art chip in the footer with the show
+   *     name beside it.
+   *   • `floating`  — a fixed ~240px card pinned to the bottom-right of
+   *     the writing area showing cover art + show name + DJ.
+   *   • `background` — the show's cover art tiles behind the textarea
+   *     at low opacity, replacing the animated backdrop.
    */
   musicMode: "thumbnail" | "floating" | "background";
   /**
-   * Recent YouTube videos the user has played. Most recent first,
-   * capped at {@link MAX_MUSIC_RECENTS}. Surfaced by the URL input as
-   * an autocomplete menu.
+   * When non-null, the user has picked a specific Otaku archive episode
+   * and playback goes through Mixcloud's widget iframe. Null = listen
+   * to NTS 1 live (whatever's on the schedule right now).
    */
-  musicRecents: MusicRecent[];
+  activeEpisode: OtakuEpisode | null;
+}
+
+/**
+ * A past Otaku episode from the NTS API. We persist the whole record so
+ * the picker can show the cover + title before the episode list has
+ * re-fetched, and so playback works offline once the episode has been
+ * buffered by the Mixcloud widget.
+ */
+export interface OtakuEpisode {
+  /** URL slug, e.g. "otaku-katsuhiro-otomo-17th-march-2026". */
+  slug: string;
+  /** Episode name, e.g. "Otaku: Katsuhiro Otomo". */
+  title: string;
+  /** ISO broadcast date, e.g. "2026-03-17T11:00:00+00:00". */
+  broadcast: string;
+  /** Large cover art URL, or null if the API didn't supply one. */
+  coverUrl: string | null;
+  /** Mixcloud feed path, e.g. "/NTSRadio/otaku-katsuhiro-otomo-17th-march-2026/".
+   * Used to construct the widget iframe src. */
+  mixcloudFeed: string;
 }
 
 const DEFAULTS: Settings = {
@@ -218,11 +210,10 @@ const DEFAULTS: Settings = {
   view: "capture",
   claudeCliPath: null,
   ambientBackground: true,
-  musicUrl: null,
   musicPlaying: false,
   musicVolume: 0.5,
   musicMode: "floating",
-  musicRecents: [],
+  activeEpisode: null,
 };
 
 const STORAGE_KEY = "braindump.settings";
@@ -246,9 +237,6 @@ function load(): Settings {
       !Number.isFinite(merged.fontSize)
     ) {
       merged.fontSize = DEFAULTS.fontSize;
-    }
-    if (!Array.isArray(merged.musicRecents)) {
-      merged.musicRecents = DEFAULTS.musicRecents;
     }
     return merged;
   } catch {
