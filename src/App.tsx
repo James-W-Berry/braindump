@@ -401,21 +401,8 @@ export default function App() {
             ambientBackground={settings.ambientBackground}
             musicUrl={settings.musicUrl}
             musicPlaying={settings.musicPlaying}
-            musicVolume={settings.musicVolume}
             musicMode={settings.musicMode}
             musicRecents={settings.musicRecents}
-            onMusicProgress={(id, seconds, ended) => {
-              // Functional update so we don't race against other
-              // settings writes (e.g. the title-fetch effect) that
-              // may be landing around the same time.
-              update("musicRecents", (prev) =>
-                prev.map((r) =>
-                  r.id === id
-                    ? { ...r, lastPosition: ended ? 0 : seconds }
-                    : r,
-                ),
-              );
-            }}
             onToggleBackdrop={() =>
               update("ambientBackground", !settings.ambientBackground)
             }
@@ -428,7 +415,6 @@ export default function App() {
             onToggleMusic={() =>
               update("musicPlaying", !settings.musicPlaying)
             }
-            onSetVolume={(v) => update("musicVolume", v)}
             onSetMusicMode={(m) => update("musicMode", m)}
           />
         ) : (
@@ -684,15 +670,12 @@ function CaptureView({
   ambientBackground,
   musicUrl,
   musicPlaying,
-  musicVolume,
   musicMode,
   musicRecents,
   onToggleBackdrop,
   onSetMusicUrl,
   onToggleMusic,
-  onSetVolume,
   onSetMusicMode,
-  onMusicProgress,
 }: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   draft: string;
@@ -704,15 +687,12 @@ function CaptureView({
   ambientBackground: boolean;
   musicUrl: string | null;
   musicPlaying: boolean;
-  musicVolume: number;
   musicMode: Settings["musicMode"];
   musicRecents: MusicRecent[];
   onToggleBackdrop: () => void;
   onSetMusicUrl: (url: string | null) => void;
   onToggleMusic: () => void;
-  onSetVolume: (v: number) => void;
   onSetMusicMode: (m: Settings["musicMode"]) => void;
-  onMusicProgress: (videoId: string, seconds: number, ended: boolean) => void;
 }) {
   const wordCount = draft.trim() ? draft.trim().split(/\s+/).length : 0;
   const [tick, setTick] = useState(0);
@@ -831,14 +811,14 @@ function CaptureView({
         aria-hidden="true"
         className="capture-pulse pointer-events-none absolute inset-x-0 bottom-12 h-px z-10"
       />
-      {/* ONE persistent player. Kept mounted whenever a URL is set —
-          including while paused, and across mode changes — so the
-          iframe never reloads and the video keeps its position. */}
+      {/* Plain iframe embed — mounts on play, unmounts on pause.
+          Position is preserved across mode switches (iframe stays put,
+          CSS-positioned) but not across pause/resume (unmount wipes
+          state; the saved `start` is read only on initial mount). */}
       {hasValidUrl && (
         <YouTubePlayer
           url={musicUrl}
           playing={musicPlaying}
-          volume={musicVolume}
           mode={musicMode}
           thumbnailRect={thumbnailRect}
           thumbnailHovered={thumbnailHovered}
@@ -847,7 +827,6 @@ function CaptureView({
           startSeconds={
             musicRecents.find((r) => r.id === videoId)?.lastPosition
           }
-          onProgress={onMusicProgress}
         />
       )}
       <footer className="relative z-10 flex items-center justify-between px-6 h-12 border-t border-[color:var(--color-border)] bg-[color:var(--color-background)]/80 backdrop-blur-sm">
@@ -966,21 +945,6 @@ function CaptureView({
             >
               + add link
             </button>
-          )}
-          {musicPlaying && hasValidUrl && (
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={Number.isFinite(musicVolume) ? musicVolume : 0.5}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (Number.isFinite(v)) onSetVolume(v);
-              }}
-              title={`volume ${Math.round((Number.isFinite(musicVolume) ? musicVolume : 0.5) * 100)}%`}
-              className="shrink-0 w-20 h-1 accent-[color:var(--color-accent)] cursor-pointer"
-            />
           )}
           {hasValidUrl && (
             <MusicModeSwitcher mode={musicMode} onChange={onSetMusicMode} />
