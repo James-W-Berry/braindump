@@ -22,7 +22,7 @@ import { ProcessingView } from "@/components/ProcessingView";
 import { SetupWizard } from "@/components/SetupWizard";
 import { ScreenshotStudio } from "@/components/ScreenshotStudio";
 import { CaptureAmbient } from "@/components/CaptureAmbient";
-import { NTSPlayer, useNowPlaying } from "@/components/NTSPlayer";
+import { NTSPlayer, useNowPlaying, type NowPlaying } from "@/components/NTSPlayer";
 import { EpisodePicker } from "@/components/EpisodePicker";
 import { type Settings, type OtakuEpisode } from "@/lib/settings";
 import { EditableText, EditableSelect, EditableCombo } from "@/components/Editable";
@@ -64,6 +64,7 @@ export default function App() {
   const [items, setItems] = useState<Item[]>([]);
   const [trashView, setTrashView] = useState(false);
   const [trashItems, setTrashItems] = useState<Item[]>([]);
+  const [itemsSearch, setItemsSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
@@ -287,111 +288,178 @@ export default function App() {
     setItems(await listItems(activeProjectId));
   }
 
+  // All hooks must be called on every render — SetupWizard takeover
+  // (below) returns a different tree, so anything hook-dependent has
+  // to live above the early return or React throws "rendered fewer
+  // hooks than expected."
+  const nowPlaying = useNowPlaying(
+    settings.musicPlaying && !settings.activeEpisode,
+  );
+  const wordCount = useMemo(
+    () => (draft.trim() ? draft.trim().split(/\s+/).length : 0),
+    [draft],
+  );
+  const visibleItems = useMemo(
+    () =>
+      filterItems(
+        trashView ? trashItems : items,
+        itemsSearch,
+        settings.hideDone,
+        trashView,
+      ),
+    [items, trashItems, itemsSearch, settings.hideDone, trashView],
+  );
+
   const firstLaunch = settings.provider == null;
-  if (firstLaunch || showProviderWizard) {
-    return (
-      <SetupWizard
-        currentLocalModel={settings.localModel}
-        claudeCliPath={settings.claudeCliPath}
-        onUpdateClaudeCliPath={(p) => update("claudeCliPath", p)}
-        onPickLocalModel={(id) => update("localModel", id)}
-        onComplete={(p) => {
-          update("provider", p);
-          setShowProviderWizard(false);
-        }}
-        onCancel={firstLaunch ? undefined : () => setShowProviderWizard(false)}
-      />
-    );
-  }
+  const wizardActive = firstLaunch || showProviderWizard;
+
+  const activeCoverUrl =
+    settings.activeEpisode?.coverUrl ?? nowPlaying?.coverUrl ?? null;
+  const showBackgroundCover =
+    settings.musicPlaying &&
+    settings.musicMode === "background" &&
+    activeCoverUrl != null;
+  const itemsTotal = visibleItems.length;
 
   return (
     <div className="flex flex-col h-full">
-      <div ref={appRootRef} className="flex flex-col flex-1 min-h-0">
-      <Header
-        projects={projects}
-        activeProjectId={activeProjectId}
-        onPickProject={setActiveProjectId}
-        onNewProject={() => setShowNewProject(true)}
-        onDeleteProject={() => activeProject && setDeletingProject(activeProject)}
-        canDeleteProject={projects.length > 1 && activeProject != null}
-        view={view === "processing" ? "capture" : view}
-        onSetView={setView}
-        settings={settings}
-        onUpdateSettings={update}
-        onOpenProviderWizard={() => setShowProviderWizard(true)}
-        onOpenScreenshot={() => setShowScreenshotStudio(true)}
-        updater={updater}
-        disabled={view === "processing"}
-      />
-
-      {error && (
-        <div className="px-6 py-2 bg-[color:var(--color-danger)]/15 text-[color:var(--color-danger)] text-sm flex items-center justify-between font-mono">
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="opacity-70 hover:opacity-100">
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
-      <main ref={mainContentRef} className="flex-1 overflow-hidden">
-        {view === "processing" ? (
-          <ProcessingView projectName={activeProject?.name ?? ""} />
-        ) : view === "capture" ? (
-          <CaptureView
-            textareaRef={textareaRef}
-            draft={draft}
-            onDraftChange={setDraft}
-            onProcess={handleProcess}
-            projectName={activeProject?.name ?? ""}
-            fontFamily={FONT_STACKS[settings.font]}
-            fontSize={settings.fontSize}
-            ambientBackground={settings.ambientBackground}
-            musicPlaying={settings.musicPlaying}
-            musicMode={settings.musicMode}
-            musicVolume={settings.musicVolume}
-            activeEpisode={settings.activeEpisode}
-            onToggleBackdrop={() =>
-              update("ambientBackground", !settings.ambientBackground)
-            }
-            onToggleMusic={() =>
-              update("musicPlaying", !settings.musicPlaying)
-            }
-            onSetMusicMode={(m) => update("musicMode", m)}
-            onSetMusicVolume={(v) => update("musicVolume", v)}
-            onPickLive={() => {
-              update("activeEpisode", null);
-              update("musicPlaying", true);
-            }}
-            onPickEpisode={(ep) => {
-              update("activeEpisode", ep);
-              update("musicPlaying", true);
-            }}
-            onMinimizeToThumbnail={() => {
-              update("musicMode", "thumbnail");
-              update("musicPlaying", false);
-            }}
-          />
-        ) : (
-          <ItemsView
-            items={trashView ? trashItems : items}
-            allTopics={existingTopics}
-            lastResult={trashView ? null : lastResult}
-            groupBy={settings.groupBy}
-            hideDone={settings.hideDone}
-            trashView={trashView}
-            onSetGroupBy={(g) => update("groupBy", g)}
-            onToggleHideDone={() => update("hideDone", !settings.hideDone)}
-            onToggleTrash={() => setTrashView((v) => !v)}
-            onToggleDone={handleToggleDone}
-            onMoveItem={handleMoveItem}
-            onEditItem={handleEditItem}
-            onDeleteItem={handleDeleteItem}
-            onRestoreItem={handleRestoreItem}
-            onPermanentDelete={handlePermanentDelete}
-          />
+      <div
+        ref={appRootRef}
+        className="relative flex flex-col flex-1 min-h-0"
+      >
+        {/* Backdrop layer — behind everything, visible in every view.
+            Animated ambient is suppressed while cover art is taking
+            over in background mode. */}
+        {!showBackgroundCover && (
+          <CaptureAmbient enabled={settings.ambientBackground} />
         )}
-      </main>
+        {showBackgroundCover && activeCoverUrl && (
+          <BackgroundCover coverUrl={activeCoverUrl} />
+        )}
 
+        <Header
+          projects={projects}
+          activeProjectId={activeProjectId}
+          onPickProject={setActiveProjectId}
+          onNewProject={() => setShowNewProject(true)}
+          onDeleteProject={() => activeProject && setDeletingProject(activeProject)}
+          canDeleteProject={projects.length > 1 && activeProject != null}
+          view={view === "processing" ? "capture" : view}
+          onSetView={setView}
+          settings={settings}
+          onUpdateSettings={update}
+          onOpenProviderWizard={() => setShowProviderWizard(true)}
+          onOpenScreenshot={() => setShowScreenshotStudio(true)}
+          updater={updater}
+          disabled={view === "processing" || wizardActive}
+        />
+
+        {error && (
+          <div className="relative z-10 px-6 py-2 bg-[color:var(--color-danger)]/15 text-[color:var(--color-danger)] text-sm flex items-center justify-between font-mono">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="opacity-70 hover:opacity-100">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        <main ref={mainContentRef} className="relative z-10 flex-1 overflow-hidden">
+          {wizardActive ? (
+            <SetupWizard
+              currentLocalModel={settings.localModel}
+              claudeCliPath={settings.claudeCliPath}
+              onUpdateClaudeCliPath={(p) => update("claudeCliPath", p)}
+              onPickLocalModel={(id) => update("localModel", id)}
+              onComplete={(p) => {
+                update("provider", p);
+                setShowProviderWizard(false);
+              }}
+              onCancel={
+                firstLaunch ? undefined : () => setShowProviderWizard(false)
+              }
+            />
+          ) : view === "processing" ? (
+            <ProcessingView projectName={activeProject?.name ?? ""} />
+          ) : view === "capture" ? (
+            <CaptureView
+              textareaRef={textareaRef}
+              draft={draft}
+              onDraftChange={setDraft}
+              onProcess={handleProcess}
+              projectName={activeProject?.name ?? ""}
+              fontFamily={FONT_STACKS[settings.font]}
+              fontSize={settings.fontSize}
+            />
+          ) : (
+            <ItemsView
+              rawItems={trashView ? trashItems : items}
+              visibleItems={visibleItems}
+              allTopics={existingTopics}
+              lastResult={trashView ? null : lastResult}
+              groupBy={settings.groupBy}
+              hideDone={settings.hideDone}
+              trashView={trashView}
+              search={itemsSearch}
+              onSearchChange={setItemsSearch}
+              onSetGroupBy={(g) => update("groupBy", g)}
+              onToggleHideDone={() => update("hideDone", !settings.hideDone)}
+              onToggleTrash={() => setTrashView((v) => !v)}
+              onToggleDone={handleToggleDone}
+              onMoveItem={handleMoveItem}
+              onEditItem={handleEditItem}
+              onDeleteItem={handleDeleteItem}
+              onRestoreItem={handleRestoreItem}
+              onPermanentDelete={handlePermanentDelete}
+            />
+          )}
+        </main>
+
+        <NTSPlayer
+          playing={settings.musicPlaying}
+          volume={settings.musicVolume}
+          mode={settings.musicMode}
+          nowPlaying={nowPlaying}
+          activeEpisode={settings.activeEpisode}
+          onClose={
+            settings.musicMode === "floating"
+              ? () => {
+                  update("musicMode", "thumbnail");
+                  update("musicPlaying", false);
+                }
+              : undefined
+          }
+        />
+
+        <AppFooter
+          view={view}
+          wordCount={wordCount}
+          itemsTotal={itemsTotal}
+          draftTrimmed={draft.trim().length > 0}
+          onProcess={handleProcess}
+          ambientBackground={settings.ambientBackground}
+          onToggleBackdrop={() =>
+            update("ambientBackground", !settings.ambientBackground)
+          }
+          musicPlaying={settings.musicPlaying}
+          musicMode={settings.musicMode}
+          musicVolume={settings.musicVolume}
+          activeEpisode={settings.activeEpisode}
+          nowPlaying={nowPlaying}
+          activeCoverUrl={activeCoverUrl}
+          onToggleMusic={() =>
+            update("musicPlaying", !settings.musicPlaying)
+          }
+          onSetMusicMode={(m) => update("musicMode", m)}
+          onSetMusicVolume={(v) => update("musicVolume", v)}
+          onPickLive={() => {
+            update("activeEpisode", null);
+            update("musicPlaying", true);
+          }}
+          onPickEpisode={(ep) => {
+            update("activeEpisode", ep);
+            update("musicPlaying", true);
+          }}
+        />
       </div>
 
       {showNewProject && (
@@ -621,18 +689,6 @@ function CaptureView({
   projectName,
   fontFamily,
   fontSize,
-  ambientBackground,
-  musicPlaying,
-  musicMode,
-  musicVolume,
-  activeEpisode,
-  onToggleBackdrop,
-  onToggleMusic,
-  onSetMusicMode,
-  onSetMusicVolume,
-  onPickLive,
-  onPickEpisode,
-  onMinimizeToThumbnail,
 }: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   draft: string;
@@ -641,54 +697,11 @@ function CaptureView({
   projectName: string;
   fontFamily: string;
   fontSize: number;
-  ambientBackground: boolean;
-  musicPlaying: boolean;
-  musicMode: Settings["musicMode"];
-  musicVolume: number;
-  activeEpisode: OtakuEpisode | null;
-  onToggleBackdrop: () => void;
-  onToggleMusic: () => void;
-  onSetMusicMode: (m: Settings["musicMode"]) => void;
-  onSetMusicVolume: (v: number) => void;
-  onPickLive: () => void;
-  onPickEpisode: (ep: OtakuEpisode) => void;
-  onMinimizeToThumbnail: () => void;
 }) {
-  const wordCount = draft.trim() ? draft.trim().split(/\s+/).length : 0;
-  const [tick, setTick] = useState(0);
   const [keyTick, setKeyTick] = useState(0);
-  const prevWordCount = useRef(wordCount);
-  // Live metadata is only needed when actually listening to the live
-  // stream — skip the poll if we're playing an archive episode or
-  // paused, to avoid wasted network + API load.
-  const nowPlaying = useNowPlaying(musicPlaying && !activeEpisode);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const labelBtnRef = useRef<HTMLButtonElement>(null);
-  const activeCoverUrl = activeEpisode?.coverUrl ?? nowPlaying?.coverUrl ?? null;
-  const showBackgroundCover =
-    musicPlaying && musicMode === "background" && activeCoverUrl;
-
-  useEffect(() => {
-    if (prevWordCount.current !== wordCount) {
-      prevWordCount.current = wordCount;
-      setTick((t) => t + 1);
-    }
-  }, [wordCount]);
-
-  const showLabel = activeEpisode
-    ? activeEpisode.title
-    : musicPlaying
-      ? nowPlaying?.showName ?? "NTS 1 · loading…"
-      : "NTS 1 · live";
 
   return (
     <div className="relative flex flex-col h-full">
-      {/* Animated backdrop is suppressed in background mode — the
-          NTS cover art below takes its place. */}
-      {!showBackgroundCover && <CaptureAmbient enabled={ambientBackground} />}
-      {showBackgroundCover && activeCoverUrl && (
-        <BackgroundCover coverUrl={activeCoverUrl} />
-      )}
       <textarea
         ref={textareaRef}
         value={draft}
@@ -709,132 +722,199 @@ function CaptureView({
       <span
         key={keyTick}
         aria-hidden="true"
-        className="capture-pulse pointer-events-none absolute inset-x-0 bottom-12 h-px z-10"
+        className="capture-pulse pointer-events-none absolute inset-x-0 bottom-0 h-px z-10"
       />
-      <NTSPlayer
-        playing={musicPlaying}
-        volume={musicVolume}
-        mode={musicMode}
-        nowPlaying={nowPlaying}
-        activeEpisode={activeEpisode}
-        onClose={
-          musicMode === "floating" ? onMinimizeToThumbnail : undefined
-        }
-      />
-      <footer className="relative z-10 flex items-center justify-between px-6 h-12 border-t border-[color:var(--color-border)] bg-[color:var(--color-background)]/80 backdrop-blur-sm">
-        <div className="flex items-center gap-4 min-w-0">
-          <span
-            key={tick}
-            className="wordcount-tick label label-row text-[color:var(--color-fg-muted)] tabular-nums shrink-0"
-          >
-            {wordCount.toString().padStart(3, "0")} words
-          </span>
-          <span className="w-px h-3.5 hairline shrink-0" />
+    </div>
+  );
+}
+
+function AppFooter({
+  view,
+  wordCount,
+  itemsTotal,
+  draftTrimmed,
+  onProcess,
+  ambientBackground,
+  onToggleBackdrop,
+  musicPlaying,
+  musicMode,
+  musicVolume,
+  activeEpisode,
+  nowPlaying,
+  activeCoverUrl,
+  onToggleMusic,
+  onSetMusicMode,
+  onSetMusicVolume,
+  onPickLive,
+  onPickEpisode,
+}: {
+  view: View;
+  wordCount: number;
+  itemsTotal: number;
+  draftTrimmed: boolean;
+  onProcess: () => void;
+  ambientBackground: boolean;
+  onToggleBackdrop: () => void;
+  musicPlaying: boolean;
+  musicMode: Settings["musicMode"];
+  musicVolume: number;
+  activeEpisode: OtakuEpisode | null;
+  nowPlaying: NowPlaying | null;
+  activeCoverUrl: string | null;
+  onToggleMusic: () => void;
+  onSetMusicMode: (m: Settings["musicMode"]) => void;
+  onSetMusicVolume: (v: number) => void;
+  onPickLive: () => void;
+  onPickEpisode: (ep: OtakuEpisode) => void;
+}) {
+  const [tick, setTick] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const labelBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Bump the count tick whenever the value the user sees changes, so
+  // the span restarts its CSS flash animation.
+  const countValue = view === "capture" ? wordCount : itemsTotal;
+  const prevCount = useRef(countValue);
+  useEffect(() => {
+    if (prevCount.current !== countValue) {
+      prevCount.current = countValue;
+      setTick((t) => t + 1);
+    }
+  }, [countValue]);
+
+  const showLabel = activeEpisode
+    ? activeEpisode.title
+    : musicPlaying
+      ? nowPlaying?.showName ?? "NTS 1 · loading…"
+      : "NTS 1 · live";
+
+  // Processing view: no count on the left (nothing meaningful to show)
+  // and no Process button on the right (the agent is already running).
+  const showCount = view !== "processing";
+  const showProcess = view === "capture";
+
+  const countText =
+    view === "capture"
+      ? `${wordCount.toString().padStart(3, "0")} words`
+      : `${itemsTotal.toString().padStart(3, "0")} items`;
+
+  return (
+    <footer className="relative z-10 flex items-center justify-between px-6 h-12 border-t border-[color:var(--color-border)] bg-[color:var(--color-background)]/80 backdrop-blur-sm">
+      <div className="flex items-center gap-4 min-w-0">
+        {showCount && (
+          <>
+            <span
+              key={tick}
+              className="wordcount-tick label label-row text-[color:var(--color-fg-muted)] tabular-nums shrink-0"
+            >
+              {countText}
+            </span>
+            <span className="w-px h-3.5 hairline shrink-0" />
+          </>
+        )}
+        <button
+          onClick={onToggleBackdrop}
+          title={
+            ambientBackground
+              ? "animated backdrop: on (click to disable)"
+              : "animated backdrop: off (click to enable)"
+          }
+          className={`shrink-0 transition-colors ${
+            ambientBackground
+              ? "text-[color:var(--color-accent)]"
+              : "text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-fg-muted)]"
+          }`}
+        >
+          <Sparkles size={13} />
+        </button>
+        {musicMode === "thumbnail" &&
+        activeCoverUrl &&
+        (musicPlaying || activeEpisode) ? (
           <button
-            onClick={onToggleBackdrop}
+            onClick={onToggleMusic}
             title={
-              ambientBackground
-                ? "animated backdrop: on (click to disable)"
-                : "animated backdrop: off (click to enable)"
+              musicPlaying
+                ? activeEpisode
+                  ? "pause episode"
+                  : "pause NTS 1"
+                : `resume ${activeEpisode?.title ?? "playback"}`
             }
-            className={`shrink-0 transition-colors ${
-              ambientBackground
+            className="relative block shrink-0 w-6 h-6 overflow-hidden border border-[color:var(--color-border)] rounded-sm"
+          >
+            <img
+              src={activeCoverUrl}
+              alt=""
+              aria-hidden="true"
+              className={`w-full h-full object-cover transition-all ${
+                musicPlaying ? "opacity-100" : "opacity-55 grayscale"
+              }`}
+            />
+            {musicPlaying && (
+              <span
+                aria-hidden="true"
+                className="ambient-dot absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[color:var(--color-accent)] border border-[color:var(--color-background)]"
+              />
+            )}
+          </button>
+        ) : (
+          <button
+            onClick={onToggleMusic}
+            title={
+              musicPlaying
+                ? activeEpisode
+                  ? "pause episode"
+                  : "pause NTS 1"
+                : activeEpisode
+                  ? `play ${activeEpisode.title}`
+                  : "play NTS 1 (live)"
+            }
+            className={`shrink-0 label label-row transition-colors ${
+              musicPlaying
                 ? "text-[color:var(--color-accent)]"
                 : "text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-fg-muted)]"
             }`}
           >
-            <Sparkles size={13} />
+            <Music2 size={13} />
+            {musicPlaying && (
+              <span className="sound-wave" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+              </span>
+            )}
           </button>
-          {/* Chip shows when we have cover art to show — either we're
-              playing live (nowPlaying resolved) OR an archive episode
-              is loaded (even if paused, so the user can resume). */}
-          {musicMode === "thumbnail" &&
-          activeCoverUrl &&
-          (musicPlaying || activeEpisode) ? (
-            <button
-              onClick={onToggleMusic}
-              title={
-                musicPlaying
-                  ? activeEpisode
-                    ? "pause episode"
-                    : "pause NTS 1"
-                  : `resume ${activeEpisode?.title ?? "playback"}`
-              }
-              className="relative block shrink-0 w-6 h-6 overflow-hidden border border-[color:var(--color-border)] rounded-sm"
-            >
-              <img
-                src={activeCoverUrl}
-                alt=""
-                aria-hidden="true"
-                className={`w-full h-full object-cover transition-all ${
-                  musicPlaying ? "opacity-100" : "opacity-55 grayscale"
-                }`}
-              />
-              {musicPlaying && (
-                <span
-                  aria-hidden="true"
-                  className="ambient-dot absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[color:var(--color-accent)] border border-[color:var(--color-background)]"
-                />
-              )}
-            </button>
-          ) : (
-            <button
-              onClick={onToggleMusic}
-              title={
-                musicPlaying
-                  ? activeEpisode
-                    ? "pause episode"
-                    : "pause NTS 1"
-                  : activeEpisode
-                    ? `play ${activeEpisode.title}`
-                    : "play NTS 1 (live)"
-              }
-              className={`shrink-0 label label-row transition-colors ${
-                musicPlaying
-                  ? "text-[color:var(--color-accent)]"
-                  : "text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-fg-muted)]"
-              }`}
-            >
-              <Music2 size={13} />
-              {musicPlaying && (
-                <span className="sound-wave" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                </span>
-              )}
-            </button>
-          )}
-          <div className="relative min-w-0 max-w-[260px]">
-            <button
-              ref={labelBtnRef}
-              onClick={() => setPickerOpen((v) => !v)}
-              title="pick Otaku episode or live"
-              className="truncate text-xs text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)] transition-colors w-full text-left"
-            >
-              {showLabel}
-            </button>
-            <EpisodePicker
-              open={pickerOpen}
-              anchorRef={labelBtnRef}
-              activeEpisode={activeEpisode}
-              onPickLive={() => {
-                onPickLive();
-                setPickerOpen(false);
-              }}
-              onPickEpisode={(ep) => {
-                onPickEpisode(ep);
-                setPickerOpen(false);
-              }}
-              onClose={() => setPickerOpen(false)}
-            />
-          </div>
-          {musicPlaying && !activeEpisode && (
-            <VolumeSlider value={musicVolume} onChange={onSetMusicVolume} />
-          )}
-          <MusicModeSwitcher mode={musicMode} onChange={onSetMusicMode} />
+        )}
+        <div className="relative min-w-0 max-w-[260px]">
+          <button
+            ref={labelBtnRef}
+            onClick={() => setPickerOpen((v) => !v)}
+            title="pick Otaku episode or live"
+            className="truncate text-xs text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)] transition-colors w-full text-left"
+          >
+            {showLabel}
+          </button>
+          <EpisodePicker
+            open={pickerOpen}
+            anchorRef={labelBtnRef}
+            activeEpisode={activeEpisode}
+            onPickLive={() => {
+              onPickLive();
+              setPickerOpen(false);
+            }}
+            onPickEpisode={(ep) => {
+              onPickEpisode(ep);
+              setPickerOpen(false);
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
         </div>
+        {musicPlaying && !activeEpisode && (
+          <VolumeSlider value={musicVolume} onChange={onSetMusicVolume} />
+        )}
+        <MusicModeSwitcher mode={musicMode} onChange={onSetMusicMode} />
+      </div>
+      {showProcess && (
         <div className="flex items-center gap-5 shrink-0">
           <span className="text-xs font-mono tracking-wide text-[color:var(--color-fg-muted)]">
             <kbd className="px-1.5 py-0.5 border border-[color:var(--color-border)] rounded-[3px]">
@@ -846,13 +926,13 @@ function CaptureView({
             </kbd>
             <span className="ml-2 opacity-70">to process</span>
           </span>
-          <Button onClick={onProcess} disabled={!draft.trim()}>
+          <Button onClick={onProcess} disabled={!draftTrimmed}>
             <Send size={13} />
             Process
           </Button>
         </div>
-      </footer>
-    </div>
+      )}
+    </footer>
   );
 }
 
@@ -939,12 +1019,15 @@ function MusicModeSwitcher({
 type EditField = "title" | "body" | "topic" | "category" | "priority" | "tags";
 
 function ItemsView({
-  items,
+  rawItems,
+  visibleItems,
   allTopics,
   lastResult,
   groupBy,
   hideDone,
   trashView,
+  search,
+  onSearchChange,
   onSetGroupBy,
   onToggleHideDone,
   onToggleTrash,
@@ -955,12 +1038,15 @@ function ItemsView({
   onRestoreItem,
   onPermanentDelete,
 }: {
-  items: Item[];
+  rawItems: Item[];
+  visibleItems: Item[];
   allTopics: string[];
   lastResult: AgentResult | null;
   groupBy: GroupBy;
   hideDone: boolean;
   trashView: boolean;
+  search: string;
+  onSearchChange: (s: string) => void;
   onSetGroupBy: (g: GroupBy) => void;
   onToggleHideDone: () => void;
   onToggleTrash: () => void;
@@ -971,33 +1057,14 @@ function ItemsView({
   onRestoreItem: (id: number) => void;
   onPermanentDelete: (id: number) => void;
 }) {
-  const [search, setSearch] = useState("");
-
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return items.filter((i) => {
-      if (!trashView && hideDone && i.status === "done") return false;
-      if (!q) return true;
-      return (
-        i.title.toLowerCase().includes(q) ||
-        (i.body?.toLowerCase().includes(q) ?? false) ||
-        (i.topic?.toLowerCase().includes(q) ?? false) ||
-        (i.tags?.toLowerCase().includes(q) ?? false) ||
-        i.category.includes(q) ||
-        i.priority.includes(q)
-      );
-    });
-  }, [items, hideDone, search, trashView]);
-
   const groups = useMemo(
     () =>
       trashView
-        ? [{ key: "trash", label: "recently deleted", items: visible }]
-        : groupItems(visible, groupBy),
-    [visible, groupBy, trashView],
+        ? [{ key: "trash", label: "recently deleted", items: visibleItems }]
+        : groupItems(visibleItems, groupBy),
+    [visibleItems, groupBy, trashView],
   );
-  const doneCount = items.filter((i) => i.status === "done").length;
-  const totalVisible = visible.length;
+  const doneCount = rawItems.filter((i) => i.status === "done").length;
 
   return (
     <div className="h-full flex flex-col">
@@ -1039,13 +1106,13 @@ function ItemsView({
             />
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => onSearchChange(e.target.value)}
               placeholder="search titles, topics, tags…"
               className="flex-1 bg-transparent border-0 outline-none text-sm placeholder:text-[color:var(--color-fg-dim)] text-[color:var(--color-fg)]"
             />
             {search && (
               <button
-                onClick={() => setSearch("")}
+                onClick={() => onSearchChange("")}
                 className="text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-fg)] shrink-0"
                 title="clear"
               >
@@ -1104,7 +1171,7 @@ function ItemsView({
                 ? `no items match “${search}”`
                 : trashView
                   ? "nothing deleted in the last 7 days."
-                  : hideDone && items.length > 0
+                  : hideDone && rawItems.length > 0
                     ? "everything done. toggle to surface completed items."
                     : "nothing yet. capture some thoughts and process."}
             </div>
@@ -1120,7 +1187,6 @@ function ItemsView({
               onDeleteItem={onDeleteItem}
               onRestoreItem={onRestoreItem}
               onPermanentDelete={onPermanentDelete}
-              totalVisible={totalVisible}
             />
           )}
         </div>
@@ -1140,7 +1206,6 @@ function Tracklist({
   onDeleteItem,
   onRestoreItem,
   onPermanentDelete,
-  totalVisible,
 }: {
   groups: { key: string; label: string; items: Item[] }[];
   groupBy: GroupBy | null;
@@ -1152,7 +1217,6 @@ function Tracklist({
   onDeleteItem: (id: number) => void;
   onRestoreItem: (id: number) => void;
   onPermanentDelete: (id: number) => void;
-  totalVisible: number;
 }) {
   let runningIndex = 0;
   return (
@@ -1196,12 +1260,6 @@ function Tracklist({
           </section>
         );
       })}
-      <div className="flex items-baseline gap-4 pt-2">
-        <div className="flex-1 h-px bg-[color:var(--color-border)]" />
-        <span className="label text-[color:var(--color-accent)] tabular-nums">
-          {totalVisible.toString().padStart(2, "0")} total
-        </span>
-      </div>
     </div>
   );
 }
@@ -1494,6 +1552,27 @@ function toRoman(n: number): string {
     }
   }
   return result;
+}
+
+function filterItems(
+  items: Item[],
+  search: string,
+  hideDone: boolean,
+  trashView: boolean,
+): Item[] {
+  const q = search.trim().toLowerCase();
+  return items.filter((i) => {
+    if (!trashView && hideDone && i.status === "done") return false;
+    if (!q) return true;
+    return (
+      i.title.toLowerCase().includes(q) ||
+      (i.body?.toLowerCase().includes(q) ?? false) ||
+      (i.topic?.toLowerCase().includes(q) ?? false) ||
+      (i.tags?.toLowerCase().includes(q) ?? false) ||
+      i.category.includes(q) ||
+      i.priority.includes(q)
+    );
+  });
 }
 
 function groupItems(items: Item[], by: GroupBy) {
