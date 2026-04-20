@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "braindump"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
