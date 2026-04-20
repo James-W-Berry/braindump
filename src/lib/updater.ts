@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { getVersion } from "@tauri-apps/api/app";
 
 export type UpdaterStatus =
   | { kind: "idle" }
@@ -13,6 +14,8 @@ export type UpdaterStatus =
 
 export interface UseUpdater {
   status: UpdaterStatus;
+  /** The installed app's version (null while still loading from Tauri). */
+  currentVersion: string | null;
   checkForUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
   hasPendingUpdate: boolean;
@@ -20,8 +23,15 @@ export interface UseUpdater {
 
 export function useUpdater(autoCheckOnMount = true): UseUpdater {
   const [status, setStatus] = useState<UpdaterStatus>({ kind: "idle" });
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null);
   const updateRef = useRef<Update | null>(null);
   const checkedOnce = useRef(false);
+
+  useEffect(() => {
+    getVersion()
+      .then((v) => setCurrentVersion(v))
+      .catch(() => setCurrentVersion(null));
+  }, []);
 
   const checkForUpdate = useCallback(async () => {
     setStatus({ kind: "checking" });
@@ -96,5 +106,5 @@ export function useUpdater(autoCheckOnMount = true): UseUpdater {
     status.kind === "downloading" ||
     status.kind === "ready";
 
-  return { status, checkForUpdate, installUpdate, hasPendingUpdate };
+  return { status, currentVersion, checkForUpdate, installUpdate, hasPendingUpdate };
 }

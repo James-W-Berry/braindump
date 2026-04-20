@@ -241,7 +241,7 @@ export function SettingsPopover({
 }
 
 function UpdatesBlock({ updater }: { updater: UseUpdater }) {
-  const { status, checkForUpdate, installUpdate } = updater;
+  const { status, currentVersion, checkForUpdate, installUpdate } = updater;
 
   let line: React.ReactNode;
   let action: React.ReactNode = null;
@@ -329,6 +329,12 @@ function UpdatesBlock({ updater }: { updater: UseUpdater }) {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="label text-[color:var(--color-fg-dim)]">installed</span>
+        <span className="font-mono text-xs text-[color:var(--color-fg-muted)] tabular-nums">
+          {currentVersion ? `v${currentVersion}` : "—"}
+        </span>
+      </div>
       <div className="text-xs leading-relaxed">{line}</div>
       <div className="flex items-center justify-between">
         {action ?? <span />}
