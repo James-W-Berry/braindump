@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Send,
@@ -30,7 +30,9 @@ import {
   listProjects,
   createProject,
   deleteProject,
-  createCapture,
+  getDraft,
+  upsertDraft,
+  clearDraft,
   markCaptureProcessed,
   listItems,
   listRecentlyDeleted,
@@ -76,6 +78,48 @@ export default function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const appRootRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLElement>(null);
+  // Pending autosave state: the most recent unsaved draft text per project,
+  // and a timer that flushes it. Kept in refs so typing doesn't rebuild the
+  // debounce every render.
+  const draftSaveTimerRef = useRef<number | null>(null);
+  const draftPendingRef = useRef<{ projectId: number; text: string } | null>(null);
+
+  const flushDraftSave = useCallback(async () => {
+    if (draftSaveTimerRef.current != null) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+    const pending = draftPendingRef.current;
+    if (!pending) return;
+    draftPendingRef.current = null;
+    if (pending.text.trim()) {
+      await upsertDraft(pending.projectId, pending.text);
+    } else {
+      await clearDraft(pending.projectId);
+    }
+  }, []);
+
+  const cancelDraftSave = useCallback(() => {
+    if (draftSaveTimerRef.current != null) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+    draftPendingRef.current = null;
+  }, []);
+
+  const scheduleDraftSave = useCallback((projectId: number, text: string) => {
+    draftPendingRef.current = { projectId, text };
+    if (draftSaveTimerRef.current != null) clearTimeout(draftSaveTimerRef.current);
+    draftSaveTimerRef.current = window.setTimeout(() => {
+      draftSaveTimerRef.current = null;
+      flushDraftSave().catch(() => {});
+    }, 500);
+  }, [flushDraftSave]);
+
+  const handleDraftChange = useCallback((s: string) => {
+    setDraft(s);
+    if (activeProjectId != null) scheduleDraftSave(activeProjectId, s);
+  }, [activeProjectId, scheduleDraftSave]);
 
   useEffect(() => {
     (async () => {
@@ -100,6 +144,41 @@ export default function App() {
     if (activeProjectId == null) return;
     listItems(activeProjectId).then(setItems).catch((e) => setError(String(e)));
   }, [activeProjectId, lastResult]);
+
+  // Load the persisted draft when switching projects. Flush any pending
+  // autosave for the previous project first so we don't lose final keystrokes.
+  useEffect(() => {
+    if (activeProjectId == null) return;
+    let cancelled = false;
+    (async () => {
+      await flushDraftSave();
+      const text = await getDraft(activeProjectId);
+      if (!cancelled) setDraft(text ?? "");
+    })().catch((e) => setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId, flushDraftSave]);
+
+  // Flush pending draft save if the window is about to close.
+  useEffect(() => {
+    const handler = () => {
+      const pending = draftPendingRef.current;
+      if (!pending) return;
+      if (draftSaveTimerRef.current != null) {
+        clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+      draftPendingRef.current = null;
+      if (pending.text.trim()) {
+        upsertDraft(pending.projectId, pending.text).catch(() => {});
+      } else {
+        clearDraft(pending.projectId).catch(() => {});
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
 
   useEffect(() => {
     if (activeProjectId == null || !trashView) return;
@@ -131,7 +210,10 @@ export default function App() {
     setError(null);
     setView("processing");
     try {
-      const capture = await createCapture(activeProject.id, draft);
+      // Cancel any scheduled autosave — we're about to write the current
+      // text explicitly and then transition the row out of the 'draft' state.
+      cancelDraftSave();
+      const capture = await upsertDraft(activeProject.id, draft);
       const existing = items.map((i) => ({
         id: i.id,
         title: i.title,
@@ -384,7 +466,7 @@ export default function App() {
             <CaptureView
               textareaRef={textareaRef}
               draft={draft}
-              onDraftChange={setDraft}
+              onDraftChange={handleDraftChange}
               onProcess={handleProcess}
               projectName={activeProject?.name ?? ""}
               fontFamily={FONT_STACKS[settings.font]}

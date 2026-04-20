@@ -76,6 +76,45 @@ export async function createCapture(
   return rows[0];
 }
 
+export async function getDraft(projectId: number): Promise<string | null> {
+  const d = await db();
+  const rows = await d.select<{ raw_text: string }[]>(
+    "SELECT raw_text FROM captures WHERE project_id = ? AND status = 'draft' LIMIT 1",
+    [projectId],
+  );
+  return rows[0]?.raw_text ?? null;
+}
+
+export async function upsertDraft(
+  projectId: number,
+  rawText: string,
+): Promise<Capture> {
+  const d = await db();
+  const res = await d.execute(
+    "UPDATE captures SET raw_text = ? WHERE project_id = ? AND status = 'draft'",
+    [rawText, projectId],
+  );
+  if (!res.rowsAffected) {
+    await d.execute(
+      "INSERT INTO captures (project_id, raw_text) VALUES (?, ?)",
+      [projectId, rawText],
+    );
+  }
+  const rows = await d.select<Capture[]>(
+    "SELECT * FROM captures WHERE project_id = ? AND status = 'draft' LIMIT 1",
+    [projectId],
+  );
+  return rows[0];
+}
+
+export async function clearDraft(projectId: number): Promise<void> {
+  const d = await db();
+  await d.execute(
+    "DELETE FROM captures WHERE project_id = ? AND status = 'draft'",
+    [projectId],
+  );
+}
+
 export async function markCaptureProcessed(
   captureId: number,
   status: "processed" | "failed",

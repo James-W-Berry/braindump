@@ -31,6 +31,12 @@ pub fn run() {
             sql: include_str!("../migrations/004_soft_delete.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "one draft capture per project",
+            sql: include_str!("../migrations/005_draft_unique.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
