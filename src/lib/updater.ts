@@ -93,6 +93,9 @@ export function useUpdater(autoCheckOnMount = true): UseUpdater {
 
   useEffect(() => {
     if (!autoCheckOnMount || checkedOnce.current) return;
+    // Dev builds would otherwise prompt to install the prod .app over
+    // themselves, which is both confusing and destructive.
+    if (import.meta.env.DEV) return;
     checkedOnce.current = true;
     // Check silently after a short delay so we don't block initial render.
     const t = setTimeout(() => {

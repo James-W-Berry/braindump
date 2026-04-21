@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { Logo } from "@/components/Logo";
+import { DevBadge } from "@/components/DevBadge";
 import { listProjects, getDraft, upsertDraft, type Project } from "@/lib/db";
 
 function readPersistedActiveProjectId(): number | null {
@@ -119,6 +120,7 @@ export function QuickCapture() {
         <span className="text-[11px] uppercase tracking-[0.2em] opacity-60">
           Quick Capture
         </span>
+        <DevBadge />
         <div className="flex-1" />
         <label className="text-[11px] opacity-60">
           project

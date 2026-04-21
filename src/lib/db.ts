@@ -2,9 +2,15 @@ import Database from "@tauri-apps/plugin-sql";
 
 let _db: Database | null = null;
 
+// Must match DB_URL in src-tauri/src/lib.rs — dev builds use a separate
+// SQLite file so locally-applied migrations can't corrupt the production DB.
+const DB_URL = import.meta.env.DEV
+  ? "sqlite:braindump-dev.db"
+  : "sqlite:braindump.db";
+
 export async function db(): Promise<Database> {
   if (!_db) {
-    _db = await Database.load("sqlite:braindump.db");
+    _db = await Database.load(DB_URL);
   }
   return _db;
 }

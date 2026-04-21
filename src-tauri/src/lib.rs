@@ -12,6 +12,15 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
+// Dev and prod use separate SQLite files so in-progress migrations and
+// experimental schema changes can't corrupt the production DB. Paired with
+// the dev-only bundle identifier in tauri.dev.conf.json, this gives two
+// layers of isolation: different app-data dir AND different filename.
+#[cfg(debug_assertions)]
+const DB_URL: &str = "sqlite:braindump-dev.db";
+#[cfg(not(debug_assertions))]
+const DB_URL: &str = "sqlite:braindump.db";
+
 /// Currently-registered quick-capture shortcut. Held in app state so
 /// `set_quick_capture_shortcut` can unregister it before swapping in a new
 /// combo.
@@ -126,7 +135,7 @@ pub fn run() {
         ))
         .plugin(
             tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:braindump.db", migrations)
+                .add_migrations(DB_URL, migrations)
                 .build(),
         )
         .plugin(
@@ -190,6 +199,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
+    // `RunEvent::Reopen` is gated to macOS in tauri-runtime, so the match
+    // itself only compiles there. Non-macOS gets an empty handler.
+    #[cfg(target_os = "macos")]
     app.run(|app_handle, event| {
         // macOS: clicking the dock icon for a hidden app fires Reopen —
         // re-show the main window so the user doesn't think we quit.
@@ -200,6 +212,9 @@ pub fn run() {
             }
         }
     });
+
+    #[cfg(not(target_os = "macos"))]
+    app.run(|_, _| {});
 }
 
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {

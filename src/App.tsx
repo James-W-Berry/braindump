@@ -23,6 +23,7 @@ import {
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
 import { Logo } from "@/components/Logo";
+import { DevBadge } from "@/components/DevBadge";
 import { Button } from "@/components/ui/button";
 import { SettingsPopover } from "@/components/SettingsPopover";
 import { ProcessingView } from "@/components/ProcessingView";
@@ -699,6 +700,7 @@ function Header({
           <span className="font-semibold uppercase tracking-[0.18em] text-[13px]">
             BRAINDUMP
           </span>
+          <DevBadge className="pointer-events-auto" />
           <Logo size={22} className="text-[color:var(--color-accent)]" />
         </span>
         <span data-tauri-drag-region className="w-px h-4 hairline" />
