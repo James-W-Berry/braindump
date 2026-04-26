@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::sync::OnceCell;
 
-pub const LOCAL_MODEL: &str = "qwen2.5:7b";
+pub const LOCAL_MODEL: &str = "gemma4:e4b";
 pub const OLLAMA_BASE_URL: &str = "http://localhost:11434";
 
 /// Cached PATH as the user's login shell would expose it. GUI-launched macOS

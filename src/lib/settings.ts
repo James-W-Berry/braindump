@@ -63,6 +63,16 @@ export const LOCAL_MODELS: LocalModelOption[] = [
       "Fastest, lightest. Good enough for capture + organize on any laptop.",
   },
   {
+    id: "gemma4:e2b",
+    label: "Gemma 4 E2B",
+    paramSize: "E2B",
+    diskGB: 7.2,
+    minRamGB: 8,
+    tier: "baseline",
+    description:
+      "Newest Google. Edge-tuned with configurable thinking modes and native system-role support. Stronger safety calibration than Qwen at the same RAM budget.",
+  },
+  {
     id: "gemma3:12b",
     label: "Gemma 3 12B",
     paramSize: "12B",
@@ -70,7 +80,27 @@ export const LOCAL_MODELS: LocalModelOption[] = [
     minRamGB: 16,
     tier: "baseline",
     description:
-      "Google-tuned. Stronger safety calibration than Qwen — better refusal behavior in sensitive contexts.",
+      "Previous-gen Gemma. Kept for users who prefer its style — Gemma 4 E4B beats it at the same size on most benchmarks.",
+  },
+  {
+    id: "gemma4:e4b",
+    label: "Gemma 4 E4B",
+    paramSize: "E4B",
+    diskGB: 9.6,
+    minRamGB: 16,
+    tier: "baseline",
+    description:
+      "Sweet spot for 16 GB Macs. Multimodal, configurable reasoning, native system role — best baseline model for reflective work.",
+  },
+  {
+    id: "gemma4:26b",
+    label: "Gemma 4 26B",
+    paramSize: "26B (A4B MoE)",
+    diskGB: 18,
+    minRamGB: 32,
+    tier: "capable",
+    description:
+      "Mixture-of-experts: full 26B in RAM but only ~4B active per token, so it runs fast on 32 GB. Replaces Gemma 3 27B as the capable-tier sweet spot.",
   },
   {
     id: "gemma3:27b",
@@ -80,7 +110,7 @@ export const LOCAL_MODELS: LocalModelOption[] = [
     minRamGB: 32,
     tier: "capable",
     description:
-      "Sweet spot for 32 GB machines. Best out-of-box safety behavior among runnable-locally options.",
+      "Previous-gen Gemma flagship. Solid safety calibration but Gemma 4 26B is faster and stronger at the same RAM ceiling.",
   },
   {
     id: "qwen2.5:32b",
@@ -103,6 +133,16 @@ export const LOCAL_MODELS: LocalModelOption[] = [
       "Deep chain-of-thought. Slower per capture but better at cross-item pattern recognition.",
   },
   {
+    id: "gemma4:31b",
+    label: "Gemma 4 31B",
+    paramSize: "31B",
+    diskGB: 20,
+    minRamGB: 32,
+    tier: "reasoning",
+    description:
+      "Dense Gemma 4 with thinking-mode toggle. Strongest Gemma judgment — slower per capture, best at multi-item synthesis.",
+  },
+  {
     id: "qwen2.5:72b",
     label: "Qwen 2.5 72B",
     paramSize: "72B",
@@ -114,7 +154,7 @@ export const LOCAL_MODELS: LocalModelOption[] = [
   },
 ];
 
-export const DEFAULT_LOCAL_MODEL_ID = "qwen2.5:7b";
+export const DEFAULT_LOCAL_MODEL_ID = "gemma4:e4b";
 
 export function findLocalModel(id: string): LocalModelOption | undefined {
   return LOCAL_MODELS.find((m) => m.id === id);
