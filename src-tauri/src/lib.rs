@@ -190,6 +190,7 @@ pub fn run() {
             setup::install_ollama,
             setup::launch_ollama,
             setup::pull_ollama_model,
+            setup::delete_ollama_model,
             setup::verify_ollama_setup,
             setup::system_ram_gb,
             setup::open_external_url,

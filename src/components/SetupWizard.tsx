@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowRight,
   ExternalLink,
+  Trash2,
   X,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
@@ -12,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import {
   checkClaude,
   checkOllama,
+  deleteOllamaModel,
   installOllama,
   launchOllama,
   pullOllamaModel,
@@ -21,6 +23,7 @@ import {
   formatBytes,
   systemRamGB,
   type ClaudeStatus,
+  type OllamaModelInfo,
   type OllamaStatus,
   type SetupProgress,
 } from "@/lib/setup";
@@ -83,6 +86,17 @@ export function SetupWizard({
     const status = await checkClaude(overridePath);
     setClaude(status);
     return status;
+  }
+
+  async function refreshOllama() {
+    const next = await checkOllama();
+    setOllama(next);
+    return next;
+  }
+
+  async function handleDeleteModel(model: string) {
+    await deleteOllamaModel(model);
+    await refreshOllama();
   }
 
   useEffect(() => {
@@ -163,6 +177,7 @@ export function SetupWizard({
             checking={checking}
             claude={claude}
             ollama={ollama}
+            currentLocalModel={currentLocalModel}
             claudeCliPath={claudeCliPath}
             onUpdateClaudeCliPath={onUpdateClaudeCliPath}
             onRefreshClaude={refreshClaude}
@@ -173,7 +188,9 @@ export function SetupWizard({
           <LocalPickScreen
             ramGB={ramGB}
             selectedId={selectedModelId}
+            installedModels={ollama?.models ?? []}
             onSelect={setSelectedModelId}
+            onDeleteModel={handleDeleteModel}
             onContinue={() => {
               onPickLocalModel(selectedModelId);
               setScreen("local-install");
@@ -197,6 +214,7 @@ function ChooseScreen({
   checking,
   claude,
   ollama,
+  currentLocalModel,
   claudeCliPath,
   onUpdateClaudeCliPath,
   onRefreshClaude,
@@ -206,6 +224,7 @@ function ChooseScreen({
   checking: boolean;
   claude: ClaudeStatus | null;
   ollama: OllamaStatus | null;
+  currentLocalModel: string;
   claudeCliPath: string | null;
   onUpdateClaudeCliPath: (path: string | null) => void;
   onRefreshClaude: (path: string | null) => Promise<ClaudeStatus>;
@@ -216,6 +235,14 @@ function ChooseScreen({
     !!ollama?.binary_present &&
     !!ollama?.service_running &&
     !!ollama?.has_required_model;
+
+  // Subtitle reflects whatever the user has currently chosen (or the default
+  // for fresh installs); falls back to the raw id if the chosen model isn't
+  // in our curated catalog.
+  const localModelLabel =
+    findLocalModel(currentLocalModel)?.label ??
+    findLocalModel(DEFAULT_LOCAL_MODEL_ID)?.label ??
+    currentLocalModel;
 
   return (
     <div className="max-w-4xl mx-auto px-10 py-12">
@@ -270,7 +297,7 @@ function ChooseScreen({
 
         <ProviderCard
           title="Local"
-          subtitle="Ollama + Qwen 2.5 7B"
+          subtitle={`Ollama + ${localModelLabel}`}
           pitch="Runs entirely on your machine. Nothing leaves your device."
           status={
             checking
@@ -445,13 +472,17 @@ function ManualClaudePath({
 function LocalPickScreen({
   ramGB,
   selectedId,
+  installedModels,
   onSelect,
+  onDeleteModel,
   onContinue,
   onBack,
 }: {
   ramGB: number;
   selectedId: string;
+  installedModels: OllamaModelInfo[];
   onSelect: (id: string) => void;
+  onDeleteModel: (model: string) => Promise<void>;
   onContinue: () => void;
   onBack: () => void;
 }) {
@@ -465,6 +496,25 @@ function LocalPickScreen({
     for (const m of LOCAL_MODELS) byTier[m.tier].push(m);
     return byTier;
   }, []);
+
+  const installedByName = useMemo(() => {
+    const map = new Map<string, OllamaModelInfo>();
+    for (const m of installedModels) map.set(m.name, m);
+    return map;
+  }, [installedModels]);
+
+  const orphans = useMemo(
+    () =>
+      installedModels.filter(
+        (m) => !LOCAL_MODELS.some((cat) => cat.id === m.name),
+      ),
+    [installedModels],
+  );
+
+  const totalDownloadedBytes = useMemo(
+    () => installedModels.reduce((sum, m) => sum + m.size, 0),
+    [installedModels],
+  );
 
   const tierOrder: Array<{ key: LocalTier; label: string; hint: string }> = [
     {
@@ -502,6 +552,8 @@ function LocalPickScreen({
         {ramGB > 0
           ? `detected · ${ramGB} GB RAM`
           : "couldn't detect RAM — warnings are disabled"}
+        {totalDownloadedBytes > 0 &&
+          ` · ${formatBytes(totalDownloadedBytes)} downloaded`}
       </p>
 
       <div className="space-y-8 mb-10">
@@ -520,12 +572,35 @@ function LocalPickScreen({
                     model={m}
                     selected={selectedId === m.id}
                     ramGB={ramGB}
+                    installed={installedByName.get(m.id)}
                     onSelect={() => onSelect(m.id)}
+                    onDelete={() => onDeleteModel(m.id)}
                   />
                 ))}
               </div>
             </section>
           ),
+        )}
+
+        {orphans.length > 0 && (
+          <section>
+            <header className="flex items-baseline gap-3 mb-3">
+              <h3 className="label text-[color:var(--color-fg)]">other downloaded</h3>
+              <div className="flex-1 h-px bg-[color:var(--color-border)]" />
+              <span className="label text-[color:var(--color-fg-dim)]">
+                models you've pulled outside the catalog
+              </span>
+            </header>
+            <div className="space-y-2">
+              {orphans.map((m) => (
+                <OrphanModelRow
+                  key={m.name}
+                  model={m}
+                  onDelete={() => onDeleteModel(m.name)}
+                />
+              ))}
+            </div>
+          </section>
         )}
       </div>
 
@@ -549,66 +624,197 @@ function ModelCard({
   model,
   selected,
   ramGB,
+  installed,
   onSelect,
+  onDelete,
 }: {
   model: LocalModelOption;
   selected: boolean;
   ramGB: number;
+  installed: OllamaModelInfo | undefined;
   onSelect: () => void;
+  onDelete: () => Promise<void>;
 }) {
   const ramKnown = ramGB > 0;
   const insufficient = ramKnown && ramGB < model.minRamGB;
   const tight = ramKnown && !insufficient && ramGB < model.minRamGB + 8;
 
   return (
-    <button
-      onClick={onSelect}
-      className={`w-full text-left border px-4 py-3.5 transition-colors flex items-start gap-4 ${
-        selected
-          ? "border-[color:var(--color-accent)] bg-[color:var(--color-accent)]/5"
-          : "border-[color:var(--color-border)] hover:border-[color:var(--color-fg-muted)]"
-      }`}
-    >
-      <div className="pt-0.5">
-        <span
-          className={`w-3 h-3 rounded-full border block ${
-            selected
-              ? "border-[color:var(--color-accent)] bg-[color:var(--color-accent)]"
-              : "border-[color:var(--color-border)]"
-          }`}
-        />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-[color:var(--color-fg)]">
-            {model.label}
-          </span>
-          <span className="label text-[color:var(--color-fg-dim)]">
-            {model.paramSize} · ~{model.diskGB} GB · {model.minRamGB} GB RAM
-          </span>
-          {insufficient && (
-            <span
-              className="label label-row text-[color:var(--color-danger)]"
-              title={`Needs ~${model.minRamGB} GB RAM — you have ${ramGB} GB. The model may fail to load or run extremely slowly.`}
-            >
-              <AlertTriangle size={12} />
-              <span>likely won't run</span>
-            </span>
-          )}
-          {tight && (
-            <span
-              className="label label-row text-amber-700 dark:text-amber-400"
-              title={`Fits in ${ramGB} GB but leaves little headroom. Expect slowness and memory pressure.`}
-            >
-              <AlertTriangle size={12} />
-              <span>tight fit</span>
-            </span>
-          )}
+    <div className="relative">
+      <button
+        onClick={onSelect}
+        className={`w-full text-left border px-4 py-3.5 transition-colors flex items-start gap-4 ${
+          selected
+            ? "border-[color:var(--color-accent)] bg-[color:var(--color-accent)]/5"
+            : "border-[color:var(--color-border)] hover:border-[color:var(--color-fg-muted)]"
+        }`}
+      >
+        <div className="pt-0.5">
+          <span
+            className={`w-3 h-3 rounded-full border block ${
+              selected
+                ? "border-[color:var(--color-accent)] bg-[color:var(--color-accent)]"
+                : "border-[color:var(--color-border)]"
+            }`}
+          />
         </div>
-        <p className="text-xs text-[color:var(--color-fg-muted)] mt-1.5 leading-relaxed">
-          {model.description}
-        </p>
+        <div className="flex-1 min-w-0 pr-10">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-[color:var(--color-fg)]">
+              {model.label}
+            </span>
+            <span className="label text-[color:var(--color-fg-dim)]">
+              {model.paramSize} · ~{model.diskGB} GB · {model.minRamGB} GB RAM
+            </span>
+            {installed && (
+              <span
+                className="label label-row text-[color:var(--color-accent)]"
+                title={`Already on disk · ${formatBytes(installed.size)}`}
+              >
+                <Check size={12} />
+                <span>downloaded</span>
+              </span>
+            )}
+            {insufficient && (
+              <span
+                className="label label-row text-[color:var(--color-danger)]"
+                title={`Needs ~${model.minRamGB} GB RAM — you have ${ramGB} GB. The model may fail to load or run extremely slowly.`}
+              >
+                <AlertTriangle size={12} />
+                <span>likely won't run</span>
+              </span>
+            )}
+            {tight && (
+              <span
+                className="label label-row text-amber-700 dark:text-amber-400"
+                title={`Fits in ${ramGB} GB but leaves little headroom. Expect slowness and memory pressure.`}
+              >
+                <AlertTriangle size={12} />
+                <span>tight fit</span>
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-[color:var(--color-fg-muted)] mt-1.5 leading-relaxed">
+            {model.description}
+          </p>
+        </div>
+      </button>
+      {installed && (
+        <DeleteModelButton
+          name={model.label}
+          size={installed.size}
+          onConfirm={onDelete}
+        />
+      )}
+    </div>
+  );
+}
+
+function OrphanModelRow({
+  model,
+  onDelete,
+}: {
+  model: OllamaModelInfo;
+  onDelete: () => Promise<void>;
+}) {
+  return (
+    <div className="relative border border-[color:var(--color-border)] px-4 py-3 flex items-center gap-3">
+      <div className="flex-1 min-w-0 pr-10">
+        <div className="text-sm font-mono text-[color:var(--color-fg)] truncate">
+          {model.name}
+        </div>
+        <div className="label text-[color:var(--color-fg-dim)] mt-0.5">
+          {model.size > 0 ? formatBytes(model.size) : "size unknown"} ·
+          downloaded outside the catalog
+        </div>
       </div>
+      <DeleteModelButton
+        name={model.name}
+        size={model.size}
+        onConfirm={onDelete}
+      />
+    </div>
+  );
+}
+
+function DeleteModelButton({
+  name,
+  size,
+  onConfirm,
+}: {
+  name: string;
+  size: number;
+  onConfirm: () => Promise<void>;
+}) {
+  const [phase, setPhase] = useState<"idle" | "confirm" | "deleting" | "error">(
+    "idle",
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  if (phase === "confirm") {
+    return (
+      <div className="absolute right-3 top-3 flex items-center gap-1.5 bg-[color:var(--color-surface)] border border-[color:var(--color-border)] px-2 py-1.5 shadow-sm">
+        <span className="label text-[color:var(--color-fg-muted)] mr-1">
+          delete · free {size > 0 ? formatBytes(size) : "?"}?
+        </span>
+        <button
+          onClick={() => setPhase("idle")}
+          className="label text-[color:var(--color-fg-muted)] hover:text-[color:var(--color-fg)] transition-colors px-1"
+        >
+          cancel
+        </button>
+        <button
+          onClick={async () => {
+            setPhase("deleting");
+            setError(null);
+            try {
+              await onConfirm();
+              // Card unmounts on success, but if the parent kept us mounted
+              // (e.g. the delete failed silently upstream), reset.
+              setPhase("idle");
+            } catch (e: unknown) {
+              setError(e instanceof Error ? e.message : String(e));
+              setPhase("error");
+            }
+          }}
+          className="label text-[color:var(--color-danger)] hover:underline px-1"
+        >
+          delete
+        </button>
+      </div>
+    );
+  }
+
+  if (phase === "deleting") {
+    return (
+      <span className="absolute right-3 top-3 label text-[color:var(--color-fg-muted)]">
+        deleting…
+      </span>
+    );
+  }
+
+  if (phase === "error") {
+    return (
+      <button
+        onClick={() => {
+          setPhase("idle");
+          setError(null);
+        }}
+        title={error ?? "delete failed"}
+        className="absolute right-3 top-3 label text-[color:var(--color-danger)] hover:underline"
+      >
+        delete failed · dismiss
+      </button>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setPhase("confirm")}
+      title={`Delete ${name} from disk`}
+      className="absolute right-3 top-3 p-1.5 text-[color:var(--color-fg-dim)] hover:text-[color:var(--color-danger)] transition-colors"
+    >
+      <Trash2 size={14} />
     </button>
   );
 }
@@ -924,7 +1130,7 @@ async function runInstallFlow(
 
   // Step 3 — pull the selected model. Skip if already present.
   const latest = await checkOllama();
-  if (!latest.models.includes(modelId)) {
+  if (!latest.models.some((m) => m.name === modelId)) {
     setActive("pull");
     setState((s) => ({
       ...s,

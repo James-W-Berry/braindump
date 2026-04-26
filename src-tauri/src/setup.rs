@@ -64,10 +64,18 @@ pub async fn check_claude(claude_path: Option<String>) -> ClaudeStatus {
 }
 
 #[derive(Debug, Serialize)]
+pub struct OllamaModelInfo {
+    pub name: String,
+    /// On-disk size in bytes, as reported by Ollama's /api/tags. Zero if the
+    /// daemon didn't return a size for this model.
+    pub size: u64,
+}
+
+#[derive(Debug, Serialize)]
 pub struct OllamaStatus {
     pub binary_present: bool,
     pub service_running: bool,
-    pub models: Vec<String>,
+    pub models: Vec<OllamaModelInfo>,
     pub has_required_model: bool,
     pub required_model: String,
 }
@@ -78,7 +86,7 @@ pub async fn check_ollama() -> OllamaStatus {
 
     let models = fetch_ollama_models().await.unwrap_or_default();
     let service_running = !models.is_empty() || ping_ollama().await;
-    let has_required_model = models.iter().any(|m| m == LOCAL_MODEL);
+    let has_required_model = models.iter().any(|m| m.name == LOCAL_MODEL);
 
     OllamaStatus {
         binary_present,
@@ -117,7 +125,7 @@ async fn ping_ollama() -> bool {
         .unwrap_or(false)
 }
 
-async fn fetch_ollama_models() -> Result<Vec<String>, String> {
+async fn fetch_ollama_models() -> Result<Vec<OllamaModelInfo>, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
@@ -134,16 +142,20 @@ async fn fetch_ollama_models() -> Result<Vec<String>, String> {
     }
 
     let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    let names = body
+    let models = body
         .get("models")
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(String::from))
+                .filter_map(|m| {
+                    let name = m.get("name").and_then(|n| n.as_str())?.to_string();
+                    let size = m.get("size").and_then(|n| n.as_u64()).unwrap_or(0);
+                    Some(OllamaModelInfo { name, size })
+                })
                 .collect()
         })
         .unwrap_or_default();
-    Ok(names)
+    Ok(models)
 }
 
 #[tauri::command]
@@ -430,6 +442,34 @@ pub async fn pull_ollama_model(app: AppHandle, model: String) -> Result<(), Stri
                 },
             );
         }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_ollama_model(model: String) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+
+    // Ollama's /api/delete accepts a JSON body with the model name. The newer
+    // daemon also accepts "model"; "name" is the older convention and works on
+    // both, matching what `pull_ollama_model` uses.
+    let body = serde_json::json!({ "name": model });
+
+    let resp = client
+        .delete(format!("{OLLAMA_BASE_URL}/api/delete"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("delete request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("ollama /api/delete returned {status}: {text}"));
     }
 
     Ok(())

@@ -7,10 +7,16 @@ export interface ClaudeStatus {
   resolved_path: string | null;
 }
 
+export interface OllamaModelInfo {
+  name: string;
+  /** On-disk size in bytes; 0 if Ollama didn't report it. */
+  size: number;
+}
+
 export interface OllamaStatus {
   binary_present: boolean;
   service_running: boolean;
-  models: string[];
+  models: OllamaModelInfo[];
   has_required_model: boolean;
   required_model: string;
 }
@@ -49,6 +55,10 @@ export async function launchOllama(): Promise<void> {
 
 export async function pullOllamaModel(model: string): Promise<void> {
   await invoke("pull_ollama_model", { model });
+}
+
+export async function deleteOllamaModel(model: string): Promise<void> {
+  await invoke("delete_ollama_model", { model });
 }
 
 export async function verifyOllamaSetup(model: string): Promise<void> {
