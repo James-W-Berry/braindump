@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { fetch } from "@tauri-apps/plugin-http";
 import type { OtakuEpisode } from "@/lib/settings";
 
 /**
