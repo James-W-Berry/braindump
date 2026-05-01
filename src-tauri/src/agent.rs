@@ -203,7 +203,14 @@ Your job is to produce a JSON object that extracts discrete items from the brain
 
 Correct typos, expand shorthand, but preserve the user's original intent. Do not invent items that aren't supported by the braindump. Split compound thoughts into separate items. Merge redundant restatements into one.
 
-Output format — respond with ONLY a JSON object, no prose, no markdown fences:
+CRITICAL OUTPUT RULES — these override any default behavior:
+- Do NOT include any reasoning, planning, analysis, thoughts, chain-of-thought, or self-reflection in your response.
+- Do NOT wrap the result in extra keys like "thought", "response", "answer", "output", or anything similar.
+- Do NOT use markdown fences, prose, preamble, or commentary.
+- Your entire response MUST be a single JSON object. The first character of your response MUST be `{` and the last character MUST be `}`.
+- The top-level keys MUST be exactly `summary` and `items` — no others.
+
+Schema:
 
 {
   "summary": "one sentence overview of what was captured",
@@ -390,11 +397,13 @@ fn agent_result_schema() -> serde_json::Value {
                         "tags": { "type": "array", "items": { "type": "string" } },
                         "related_item_ids": { "type": "array", "items": { "type": "integer" } }
                     },
-                    "required": ["title", "category", "priority", "topic", "tags", "related_item_ids"]
+                    "required": ["title", "body", "category", "priority", "topic", "tags", "related_item_ids"],
+                    "additionalProperties": false
                 }
             }
         },
-        "required": ["items"]
+        "required": ["summary", "items"],
+        "additionalProperties": false
     })
 }
 
